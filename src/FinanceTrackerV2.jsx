@@ -1655,6 +1655,77 @@ function Goals({goals, setGoals, accounts, setAccounts, session, reloadAll}) {
 }
 
 // ─── MSI ──────────────────────────────────────────────────────────────────────
+function MSISummary({calcPaidMonths, form, C, mxn}) {
+  const paid = calcPaidMonths(form.startDate, form.months);
+  const totalM = parseInt(form.months)||0;
+  const rem = Math.max(0, totalM - paid);
+  const monthly = parseFloat(form.monthly)||0;
+  return (
+    <div style={{background:C.elevated,borderRadius:11,padding:"11px 13px",marginBottom:14,border:`1px solid ${paid>0?C.orange+"55":C.border}`,borderLeft:`3px solid ${paid>0?C.orange:C.border}`}}>
+      <div style={{fontSize:11,fontWeight:700,color:C.sub,textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Resumen estimado</div>
+      <div style={{display:"flex",justifyContent:"space-between"}}>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:16,fontWeight:900,color:C.green}}>{paid}</div>
+          <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Pagados</div>
+        </div>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:16,fontWeight:900,color:C.orange}}>{rem}</div>
+          <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Restantes</div>
+        </div>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:16,fontWeight:900,color:C.text}}>{totalM}</div>
+          <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Total MSI</div>
+        </div>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:14,fontWeight:900,color:rem>0?C.red:C.green}}>{mxn(rem*monthly,true)}</div>
+          <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Pendiente</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlanCard({plan, accounts, onEdit}) {
+  const rem=Math.max(0,plan.totalM-plan.paidM); const pend=rem*plan.monthly;
+  const pct=plan.paidM/plan.totalM*100; const done=rem===0;
+  const acc=accounts.find(a=>a.id===plan.accountId);
+  return (
+    <div style={{background:C.card,borderRadius:16,padding:14,border:`1px solid ${done?C.green+"44":C.border}`,marginBottom:8}}>
+      <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:10}}>
+        <div style={{width:40,height:40,borderRadius:11,background:done?C.greenDim:(acc?.color||C.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{done?"✅":"🔄"}</div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:14,fontWeight:800,color:C.text}}>{plan.desc}</div>
+          <div style={{display:"flex",alignItems:"center",gap:5,marginTop:4,flexWrap:"wrap"}}>
+            {acc ? <Tag color={acc.color}>💳 {acc.name}</Tag> : <span style={{fontSize:10,color:C.muted}}>Sin tarjeta</span>}
+            {plan.startDate&&<span style={{fontSize:10,color:C.muted}}>{fmtDateShort(plan.startDate)}</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:17,fontWeight:900,color:C.text}}>{mxn(plan.monthly)}</div>
+            <div style={{fontSize:10,color:C.muted}}>/ mes</div>
+          </div>
+          <button onClick={()=>onEdit(plan)} style={{background:C.elevated,border:`1px solid ${C.border}`,borderRadius:8,padding:"3px 8px",color:C.sub,fontSize:11,cursor:"pointer"}}>✏️ Editar</button>
+        </div>
+      </div>
+      <ProgressBar pct={pct} color={done?C.green:C.accent} h={5}/>
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
+        {[
+          {l:"Pagados",v:plan.paidM,c:C.text},
+          {l:"Restan",v:rem,c:done?C.green:C.orange},
+          {l:"Total",v:`${plan.totalM} MSI`,c:C.sub},
+          {l:"Pendiente",v:mxn(pend,true),c:done?C.green:C.red},
+        ].map((s,i)=>(
+          <div key={i} style={{flex:1,textAlign:"center",borderRight:i<3?`1px solid ${C.border}`:"none"}}>
+            <div style={{fontSize:12,fontWeight:800,color:s.c}}>{s.v}</div>
+            <div style={{fontSize:9,color:C.muted,marginTop:1,textTransform:"uppercase",letterSpacing:.3}}>{s.l}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MSI({plans, setPlans, accounts, session, reloadAll}) {
   const [showModal, setShowModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState(null);
@@ -1725,47 +1796,6 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
     if(reloadAll) await reloadAll();
   };
 
-  const PlanCard = ({plan}) => {
-    const rem=Math.max(0,plan.totalM-plan.paidM); const pend=rem*plan.monthly;
-    const pct=plan.paidM/plan.totalM*100; const done=rem===0;
-    const acc=accounts.find(a=>a.id===plan.accountId);
-    return (
-      <div style={{background:C.card,borderRadius:16,padding:14,border:`1px solid ${done?C.green+"44":C.border}`,marginBottom:8}}>
-        <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:10}}>
-          <div style={{width:40,height:40,borderRadius:11,background:done?C.greenDim:(acc?.color||C.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{done?"✅":"🔄"}</div>
-          <div style={{flex:1}}>
-            <div style={{fontSize:14,fontWeight:800,color:C.text}}>{plan.desc}</div>
-            <div style={{display:"flex",alignItems:"center",gap:5,marginTop:4,flexWrap:"wrap"}}>
-              {acc ? <Tag color={acc.color}>💳 {acc.name}</Tag> : <span style={{fontSize:10,color:C.muted}}>Sin tarjeta</span>}
-              {plan.startDate&&<span style={{fontSize:10,color:C.muted}}>{fmtDateShort(plan.startDate)}</span>}
-            </div>
-          </div>
-          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
-            <div style={{textAlign:"right"}}>
-              <div style={{fontSize:17,fontWeight:900,color:C.text}}>{mxn(plan.monthly)}</div>
-              <div style={{fontSize:10,color:C.muted}}>/ mes</div>
-            </div>
-            <button onClick={()=>openEdit(plan)} style={{background:C.elevated,border:`1px solid ${C.border}`,borderRadius:8,padding:"3px 8px",color:C.sub,fontSize:11,cursor:"pointer"}}>✏️ Editar</button>
-          </div>
-        </div>
-        <ProgressBar pct={pct} color={done?C.green:C.accent} h={5}/>
-        <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
-          {[
-            {l:"Pagados",v:plan.paidM,c:C.text},
-            {l:"Restan",v:rem,c:done?C.green:C.orange},
-            {l:"Total",v:`${plan.totalM} MSI`,c:C.sub},
-            {l:"Pendiente",v:mxn(pend,true),c:done?C.green:C.red},
-          ].map((s,i)=>(
-            <div key={i} style={{flex:1,textAlign:"center",borderRight:i<3?`1px solid ${C.border}`:"none"}}>
-              <div style={{fontSize:12,fontWeight:800,color:s.c}}>{s.v}</div>
-              <div style={{fontSize:9,color:C.muted,marginTop:1,textTransform:"uppercase",letterSpacing:.3}}>{s.l}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
   const SectionHeader = ({label, count, total, isOpen, onToggle, color=C.accent}) => (
     <button onClick={onToggle} style={{
       width:"100%",display:"flex",alignItems:"center",gap:10,
@@ -1805,7 +1835,7 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
         />
         {openActive&&(
           <div style={{background:C.card,border:`1px solid ${C.accent}33`,borderTop:"none",borderRadius:"0 0 14px 14px",padding:"10px 10px 2px",marginBottom:10}}>
-            {active.length>0 ? active.map(p=><PlanCard key={p.id} plan={p}/>) : (
+            {active.length>0 ? active.map(p=><PlanCard key={p.id} plan={p} accounts={accounts} onEdit={openEdit}/>) : (
               <div style={{textAlign:"center",padding:"20px 0",color:C.muted,fontSize:12}}>Sin planes activos</div>
             )}
           </div>
@@ -1822,7 +1852,7 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
         />
         {openDone&&(
           <div style={{background:C.card,border:`1px solid ${C.green}33`,borderTop:"none",borderRadius:"0 0 14px 14px",padding:"10px 10px 2px",marginBottom:10}}>
-            {done.length>0 ? done.map(p=><PlanCard key={p.id} plan={p}/>) : (
+            {done.length>0 ? done.map(p=><PlanCard key={p.id} plan={p} accounts={accounts} onEdit={openEdit}/>) : (
               <div style={{textAlign:"center",padding:"20px 0",color:C.muted,fontSize:12}}>Sin planes completados</div>
             )}
           </div>
@@ -1846,35 +1876,7 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
           <Field label="Meses pagados" hint="Ajusta si es necesario">
             <NumberStepper value={parseInt(form.paidMonths)||0} onChange={v=>setForm(f=>({...f,paidMonths:v}))} min={0} max={parseInt(form.months)||24}/>
           </Field>
-        ) : (()=>{
-          const paid = calcPaidMonths(form.startDate, form.months);
-          const totalM = parseInt(form.months)||0;
-          const rem = Math.max(0, totalM - paid);
-          const monthly = parseFloat(form.monthly)||0;
-          return (
-            <div style={{background:C.elevated,borderRadius:11,padding:"11px 13px",marginBottom:14,border:`1px solid ${paid>0?C.orange+"55":C.border}`,borderLeft:`3px solid ${paid>0?C.orange:C.border}`}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.sub,textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Resumen estimado</div>
-              <div style={{display:"flex",justifyContent:"space-between"}}>
-                <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:16,fontWeight:900,color:C.green}}>{paid}</div>
-                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Pagados</div>
-                </div>
-                <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:16,fontWeight:900,color:C.orange}}>{rem}</div>
-                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Restantes</div>
-                </div>
-                <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:16,fontWeight:900,color:C.text}}>{totalM}</div>
-                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Total MSI</div>
-                </div>
-                <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:14,fontWeight:900,color:rem>0?C.red:C.green}}>{mxn(rem*monthly,true)}</div>
-                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Pendiente</div>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
+        ) : <MSISummary calcPaidMonths={calcPaidMonths} form={form} C={C} mxn={mxn}/>}
         {editingPlan && (
           <button onClick={deletePlan} style={{width:"100%",background:C.redDim,border:`1px solid ${C.red}44`,borderRadius:12,padding:"12px 0",color:C.red,fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:8}}>
             🗑 Eliminar plan
