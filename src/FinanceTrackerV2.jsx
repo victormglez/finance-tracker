@@ -2138,7 +2138,8 @@ export default function App() {
   return (
     <div style={{background:C.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",position:"relative",fontFamily:"-apple-system,'SF Pro Display','Segoe UI',sans-serif"}}>
       <style>{globalStyles+`::-webkit-scrollbar{display:none;}`}</style>
-      <div style={{minHeight:"env(safe-area-inset-top, 44px)",background:C.bg,display:"flex",alignItems:"flex-end",justifyContent:"flex-end",paddingRight:16,paddingBottom:6}}>
+      <div style={{height:"env(safe-area-inset-top, 44px)",background:C.bg}}/>
+      <div style={{display:"flex",justifyContent:"flex-end",padding:"6px 16px 0",background:C.bg}}>
         <button onClick={handleLogout} style={{background:"none",border:"none",color:C.sub,fontSize:11,cursor:"pointer",padding:"3px 8px",fontFamily:"inherit"}}>Cerrar sesión →</button>
       </div>
       <div style={{paddingBottom:"calc(85px + env(safe-area-inset-bottom, 0px))"}}>
