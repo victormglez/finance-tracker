@@ -1226,8 +1226,14 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
                 </div>
               </div>
             )}
-            <button onClick={()=>{setExpenses(prev=>prev.filter(e=>e.id!==exp.id));setShowDetail(null);}}
-              style={{width:"100%",background:C.redDim,border:`1px solid ${C.red}44`,borderRadius:12,padding:"11px 0",color:C.red,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            <button onClick={async()=>{
+              if(!window.confirm("¿Eliminar este gasto?")) return;
+              await sb.from("expenses").delete().eq("id", exp.id);
+              const acc = accounts.find(a=>a.id===exp.accountId);
+              if(acc) await sb.from("accounts").update({balance: acc.balance + exp.amount}).eq("id", acc.id);
+              setShowDetail(null);
+              if(reloadAll) await reloadAll();
+            }} style={{width:"100%",background:C.redDim,border:`1px solid ${C.red}44`,borderRadius:12,padding:"11px 0",color:C.red,fontSize:13,fontWeight:700,cursor:"pointer"}}>
               🗑 Eliminar gasto
             </button>
           </Modal>
