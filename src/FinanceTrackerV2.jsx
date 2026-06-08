@@ -15,13 +15,6 @@ const db = {
   del:    (table, id)    => sb.from(table).delete().eq("id", id),
 };
 
-// ─── EMPTY INITIAL STATE ──────────────────────────────────────────────────────
-const INIT_ACCOUNTS   = [];
-const INIT_CATEGORIES = [];
-const INIT_SUBS       = [];
-const INIT_EXPENSES   = [];
-const INIT_GOALS      = [];
-const INIT_MSI        = [];
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
   bg: "#08080E", card: "#10101A", elevated: "#16162A",
@@ -2046,49 +2039,6 @@ function AuthScreen({ onLogin }) {
             </button>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── RESPONSIVE HOOK ─────────────────────────────────────────────────────────
-function useBreakpoint() {
-  const [w, setW] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
-  useEffect(() => {
-    const fn = () => setW(window.innerWidth);
-    window.addEventListener("resize", fn);
-    return () => window.removeEventListener("resize", fn);
-  }, []);
-  return { isMobile: w < 768, isDesktop: w >= 1200, width: w };
-}
-
-const NAV_TABS = [
-  {id:"dashboard",icon:"⊞", label:"Inicio"},
-  {id:"expenses", icon:"🧾",label:"Gastos"},
-  {id:"msi",      icon:"🔄",label:"MSI"},
-  {id:"goals",    icon:"🎯",label:"Metas"},
-  {id:"subs",     icon:"📲",label:"Suscripciones"},
-];
-
-function Sidebar({ tab, setTab, userName, onLogout }) {
-  return (
-    <div style={{width:220,flexShrink:0,background:C.card,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",padding:"24px 12px",gap:4,position:"sticky",top:0,height:"100vh",overflowY:"auto"}}>
-      <div style={{padding:"8px 12px 28px"}}>
-        <div style={{fontSize:22,fontWeight:900,color:C.text,letterSpacing:-0.5}}>💰 Finance</div>
-        <div style={{fontSize:12,color:C.sub,marginTop:2}}>Tracker</div>
-      </div>
-      {NAV_TABS.map(t=>{
-        const active=tab===t.id;
-        return (
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderRadius:12,border:"none",background:active?C.accentDim:"transparent",cursor:"pointer",width:"100%",textAlign:"left",transition:"background .15s",outline:active?`1px solid ${C.accent}44`:"none"}}>
-            <span style={{fontSize:18,lineHeight:1}}>{t.icon}</span>
-            <span style={{fontSize:14,fontWeight:active?700:500,color:active?C.accent:C.sub}}>{t.label}</span>
-          </button>
-        );
-      })}
-      <div style={{marginTop:"auto",padding:"12px 14px",borderTop:`1px solid ${C.border}`}}>
-        <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:6}}>{userName}</div>
-        <button onClick={onLogout} style={{fontSize:11,color:C.sub,background:"none",border:"none",cursor:"pointer",padding:0}}>Cerrar sesión →</button>
       </div>
     </div>
   );
