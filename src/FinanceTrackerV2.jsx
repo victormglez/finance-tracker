@@ -268,6 +268,16 @@ function SaveBtn({onClick,children,color=C.accent}) {
   );
 }
 
+function NumberStepper({value, onChange, min=0, max=999}) {
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:0,background:C.elevated,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`,width:"fit-content"}}>
+      <button onClick={()=>onChange(Math.max(min,value-1))} style={{background:"none",border:"none",width:38,height:38,fontSize:18,cursor:"pointer",color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+      <div style={{minWidth:32,textAlign:"center",fontSize:15,fontWeight:800,color:C.text}}>{value}</div>
+      <button onClick={()=>onChange(Math.min(max,value+1))} style={{background:"none",border:"none",width:38,height:38,fontSize:18,cursor:"pointer",color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+    </div>
+  );
+}
+
 // ─── ACCOUNT CARD ─────────────────────────────────────────────────────────────
 function AccountCard({acc, onClick}) {
   const pct = acc.type==="credit" ? utilPct(acc.balance,acc.limit) : null;
