@@ -72,6 +72,21 @@ function calcPaymentDate(purchaseDate, cutDay, payDay) {
   return `${payDate.getFullYear()}-${String(payDate.getMonth()+1).padStart(2,'0')}-${String(actualPayDay).padStart(2,'0')}`;
 }
 
+// MSI payment date sequence starting from purchaseDate
+function getMsiPaymentDates(purchaseDate, acc, numMonths) {
+  if (!acc?.cutDay || !acc?.payDay) return [];
+  const firstPayment = calcPaymentDate(purchaseDate, acc.cutDay, acc.payDay);
+  const dates = [firstPayment];
+  for (let i = 1; i < numMonths; i++) {
+    const prev = parseDate(dates[i - 1]);
+    const next = new Date(prev.getFullYear(), prev.getMonth() + 1, acc.payDay);
+    const maxDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+    const d = Math.min(acc.payDay, maxDay);
+    dates.push(`${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+  }
+  return dates;
+}
+
 // Days until a date
 function daysUntil(dateStr) {
   const now = new Date(); now.setHours(0,0,0,0);
@@ -803,22 +818,6 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
   const msiTotal = parseFloat(form.amount)||0;
   const msiMonthly = msiTotal > 0 && msiMonthsNum > 0 ? Math.round((msiTotal / msiMonthsNum)*100)/100 : 0;
 
-  // Generate the date of each MSI installment payment
-  // First payment = calcPaymentDate(purchaseDate) → subsequent ones +1 month each
-  const getMsiPaymentDates = (purchaseDate, acc, numMonths) => {
-    if (!acc?.cutDay || !acc?.payDay) return [];
-    const firstPayment = calcPaymentDate(purchaseDate, acc.cutDay, acc.payDay);
-    const dates = [firstPayment];
-    for (let i=1; i<numMonths; i++) {
-      const prev = parseDate(dates[i-1]);
-      const next = new Date(prev.getFullYear(), prev.getMonth()+1, acc.payDay);
-      const maxDay = new Date(next.getFullYear(), next.getMonth()+1, 0).getDate();
-      const d = Math.min(acc.payDay, maxDay);
-      dates.push(`${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
-    }
-    return dates;
-  };
-
   const save = async () => {
     if(!form.description.trim()||!form.amount) return;
     const amt = parseFloat(form.amount); if(isNaN(amt)||amt<=0) return;
@@ -850,6 +849,8 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
         }));
         await sb.from("expenses").insert(rows);
       }
+      // 3. Deduct full purchase from card balance
+      if (acc) await sb.from("accounts").update({ balance: acc.balance - amt }).eq("id", acc.id);
 
     } else {
       const pd = acc?.type==="credit"&&acc.cutDay&&acc.payDay ? calcPaymentDate(form.date,acc.cutDay,acc.payDay) : null;
@@ -865,12 +866,13 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
         linked_goal_id: (isSavingsCat && form.linkedGoalId) ? form.linkedGoalId : null,
       });
 
-      // If savings → update goal + deduct from Nómina in Supabase
+      // Update account balance
+      if (acc) await sb.from("accounts").update({ balance: acc.balance - amt }).eq("id", acc.id);
+
+      // If savings → update goal
       if (isSavingsCat && form.linkedGoalId) {
         const goal = goals.find(g=>g.id===form.linkedGoalId);
         if (goal) await sb.from("goals").update({ current_amount: goal.current + amt }).eq("id", goal.id);
-        const nominaAcc = accounts.find(a=>a.type==="debit");
-        if (nominaAcc) await sb.from("accounts").update({ balance: nominaAcc.balance - amt }).eq("id", nominaAcc.id);
       }
     }
 
@@ -1655,9 +1657,11 @@ function Goals({goals, setGoals, accounts, setAccounts, session, reloadAll}) {
 // ─── MSI ──────────────────────────────────────────────────────────────────────
 function MSI({plans, setPlans, accounts, session, reloadAll}) {
   const [showModal, setShowModal] = useState(false);
+  const [editingPlan, setEditingPlan] = useState(null);
   const [openActive, setOpenActive] = useState(true);
   const [openDone, setOpenDone] = useState(false);
-  const [form, setForm] = useState({desc:"",total:"",monthly:"",months:"12",accountId:accounts[0]?.id||"",startDate:today()});
+  const emptyForm = {desc:"",total:"",monthly:"",months:"12",accountId:accounts[0]?.id||"",startDate:today(),paidMonths:0};
+  const [form, setForm] = useState(emptyForm);
 
   const active = plans.filter(p=>p.paidM<p.totalM);
   const done   = plans.filter(p=>p.paidM>=p.totalM);
@@ -1671,12 +1675,53 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
     return Math.max(0, Math.min(elapsed, parseInt(totalMonths) || 0));
   };
 
-  const save=async()=>{
-    if(!form.desc||!form.total||!form.monthly)return;
-    const paid = calcPaidMonths(form.startDate, form.months);
-    await sb.from("msi_plans").insert({ user_id: session?.user?.id, description: form.desc.trim(), total_amount: parseFloat(form.total), monthly_payment: parseFloat(form.monthly), total_months: parseInt(form.months), paid_months: paid, account_id: form.accountId||null, start_date: form.startDate||today() });
-    setForm({desc:"",total:"",monthly:"",months:"12",accountId:accounts[0]?.id||"",startDate:today()});
-    setShowModal(false);
+  const openNew = () => { setEditingPlan(null); setForm(emptyForm); setShowModal(true); };
+  const openEdit = (plan) => {
+    setEditingPlan(plan);
+    setForm({desc:plan.desc, total:String(plan.total), monthly:String(plan.monthly), months:String(plan.totalM), accountId:plan.accountId||accounts[0]?.id||"", startDate:plan.startDate||today(), paidMonths:plan.paidM});
+    setShowModal(true);
+  };
+  const closeModal = () => { setShowModal(false); setEditingPlan(null); setForm(emptyForm); };
+
+  const save = async () => {
+    if(!form.desc||!form.total||!form.monthly) return;
+    const paid = editingPlan ? parseInt(form.paidMonths)||0 : calcPaidMonths(form.startDate, form.months);
+    const totalM = parseInt(form.months)||0;
+    const monthly = parseFloat(form.monthly);
+    const data = { description:form.desc.trim(), total_amount:parseFloat(form.total), monthly_payment:monthly, total_months:totalM, paid_months:paid, account_id:form.accountId||null, start_date:form.startDate||today() };
+
+    if (editingPlan) {
+      await sb.from("msi_plans").update(data).eq("id", editingPlan.id);
+    } else {
+      const acc = accounts.find(a=>a.id===form.accountId);
+      const { data: planRow } = await sb.from("msi_plans").insert({ ...data, user_id: session?.user?.id }).select().single();
+
+      // Create expense rows only for remaining (unpaid) installments
+      if (planRow && acc?.cutDay && acc?.payDay) {
+        const allDates = getMsiPaymentDates(form.startDate||today(), acc, totalM);
+        const futureDates = allDates.slice(paid); // skip already-paid months
+        if (futureDates.length > 0) {
+          const rows = futureDates.map((pd, i) => ({
+            user_id: session?.user?.id,
+            description: `${form.desc.trim()} (${paid + i + 1}/${totalM})`,
+            amount: monthly, date: pd,
+            account_id: acc.id, category_id: null,
+            payment_date: pd, is_msi: true,
+            msi_plan_id: planRow.id, msi_index: paid + i + 1, msi_total: totalM,
+            is_tdc_payment: false, is_subscription: false,
+          }));
+          await sb.from("expenses").insert(rows);
+        }
+      }
+    }
+    closeModal();
+    if(reloadAll) await reloadAll();
+  };
+
+  const deletePlan = async () => {
+    if(!window.confirm("¿Eliminar este plan MSI?")) return;
+    await sb.from("msi_plans").delete().eq("id", editingPlan.id);
+    closeModal();
     if(reloadAll) await reloadAll();
   };
 
@@ -1695,9 +1740,12 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
               {plan.startDate&&<span style={{fontSize:10,color:C.muted}}>{fmtDateShort(plan.startDate)}</span>}
             </div>
           </div>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontSize:17,fontWeight:900,color:C.text}}>{mxn(plan.monthly)}</div>
-            <div style={{fontSize:10,color:C.muted}}>/ mes</div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:17,fontWeight:900,color:C.text}}>{mxn(plan.monthly)}</div>
+              <div style={{fontSize:10,color:C.muted}}>/ mes</div>
+            </div>
+            <button onClick={()=>openEdit(plan)} style={{background:C.elevated,border:`1px solid ${C.border}`,borderRadius:8,padding:"3px 8px",color:C.sub,fontSize:11,cursor:"pointer"}}>✏️ Editar</button>
           </div>
         </div>
         <ProgressBar pct={pct} color={done?C.green:C.accent} h={5}/>
@@ -1742,7 +1790,7 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
           <div style={{fontSize:26,fontWeight:900,color:C.text}}>Planes MSI</div>
           <div style={{fontSize:13,color:C.sub,marginTop:2}}>Pendiente: <span style={{color:C.orange,fontWeight:800}}>{mxn(totalPending)}</span></div>
         </div>
-        <button onClick={()=>setShowModal(true)} style={{background:C.orange,border:"none",borderRadius:22,width:44,height:44,color:"#fff",fontSize:22,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+        <button onClick={openNew} style={{background:C.orange,border:"none",borderRadius:22,width:44,height:44,color:"#fff",fontSize:22,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
       </div>
 
       <div style={{padding:"0 20px"}}>
@@ -1781,17 +1829,24 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
         )}
       </div>
 
-      <Modal open={showModal} onClose={()=>setShowModal(false)} title="Nuevo Plan MSI">
+      <Modal open={showModal} onClose={closeModal} title={editingPlan ? "Editar Plan MSI" : "Nuevo Plan MSI"}>
         <Field label="Descripción"><Input value={form.desc} onChange={v=>setForm(f=>({...f,desc:v}))} placeholder="Ej. MacBook Pro..."/></Field>
         <Field label="Monto Total (MXN)"><Input value={form.total} onChange={v=>setForm(f=>({...f,total:v}))} placeholder="0.00" type="number"/></Field>
         <Field label="Pago Mensual (MXN)"><Input value={form.monthly} onChange={v=>setForm(f=>({...f,monthly:v}))} placeholder="0.00" type="number"/></Field>
         <Field label="Número de MSI">
           <ChipSelect options={["3","6","9","12","18","24"]} value={form.months} onChange={v=>setForm(f=>({...f,months:v}))}/>
         </Field>
+        <Field label="Tarjeta">
+          <ChipSelect options={accounts.filter(a=>a.type==="credit")} value={form.accountId} onChange={v=>setForm(f=>({...f,accountId:v}))} getColor={a=>a.color}/>
+        </Field>
         <Field label="Fecha de compra" hint="¿Cuándo realizaste la compra?">
           <Input value={form.startDate} onChange={v=>setForm(f=>({...f,startDate:v}))} type="date"/>
         </Field>
-        {(()=>{
+        {editingPlan ? (
+          <Field label="Meses pagados" hint="Ajusta si es necesario">
+            <NumberStepper value={parseInt(form.paidMonths)||0} onChange={v=>setForm(f=>({...f,paidMonths:v}))} min={0} max={parseInt(form.months)||24}/>
+          </Field>
+        ) : (()=>{
           const paid = calcPaidMonths(form.startDate, form.months);
           const totalM = parseInt(form.months)||0;
           const rem = Math.max(0, totalM - paid);
@@ -1820,10 +1875,12 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
             </div>
           );
         })()}
-        <Field label="Tarjeta">
-          <ChipSelect options={accounts.filter(a=>a.type==="credit")} value={form.accountId} onChange={v=>setForm(f=>({...f,accountId:v}))} getColor={a=>a.color}/>
-        </Field>
-        <SaveBtn onClick={save} color={C.orange}>Crear Plan MSI</SaveBtn>
+        {editingPlan && (
+          <button onClick={deletePlan} style={{width:"100%",background:C.redDim,border:`1px solid ${C.red}44`,borderRadius:12,padding:"12px 0",color:C.red,fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:8}}>
+            🗑 Eliminar plan
+          </button>
+        )}
+        <SaveBtn onClick={save} color={C.orange}>{editingPlan ? "Guardar Cambios" : "Crear Plan MSI"}</SaveBtn>
       </Modal>
     </div>
   );
