@@ -187,7 +187,7 @@ function Modal({open,onClose,title,children}) {
   return (
     <div style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(0,0,0,.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(4px)"}}
       onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:C.elevated,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:480,maxHeight:"92vh",padding:22,paddingTop:10,overflowY:"auto",border:`1px solid ${C.borderLight}`,borderBottom:"none",animation:"slideUp .28s cubic-bezier(.4,0,.2,1)"}}>
+      <div style={{background:C.elevated,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:480,maxHeight:"92vh",padding:22,paddingTop:10,paddingBottom:"calc(22px + env(safe-area-inset-bottom, 0px))",overflowY:"auto",border:`1px solid ${C.borderLight}`,borderBottom:"none",animation:"slideUp .28s cubic-bezier(.4,0,.2,1)"}}>
         <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 18px"}}/>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
           <span style={{fontSize:17,fontWeight:900,color:C.text,letterSpacing:-.3}}>{title}</span>
@@ -2138,11 +2138,11 @@ export default function App() {
   return (
     <div style={{background:C.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",position:"relative",fontFamily:"-apple-system,'SF Pro Display','Segoe UI',sans-serif"}}>
       <style>{globalStyles+`::-webkit-scrollbar{display:none;}`}</style>
-      <div style={{height:44,background:C.bg}}/>
-      <div style={{paddingBottom:85}}>
+      <div style={{height:"env(safe-area-inset-top, 44px)",background:C.bg}}/>
+      <div style={{paddingBottom:"calc(85px + env(safe-area-inset-bottom, 0px))"}}>
         {dataLoading ? <div style={{color:C.sub,textAlign:"center",paddingTop:80}}>Cargando datos...</div> : screen}
       </div>
-      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:C.card,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 4px 22px",zIndex:100,backdropFilter:"blur(20px)"}}>
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:C.card,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 4px 0",paddingBottom:"calc(16px + env(safe-area-inset-bottom, 0px))",zIndex:100,backdropFilter:"blur(20px)"}}>
         {NAV_TABS.map(t=>{
           const active=tab===t.id;
           return (
