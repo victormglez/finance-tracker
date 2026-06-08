@@ -2051,14 +2051,54 @@ function AuthScreen({ onLogin }) {
   );
 }
 
-// ─── APP ──────────────────────────────────────────────────────────────────────
+// ─── RESPONSIVE HOOK ─────────────────────────────────────────────────────────
+function useBreakpoint() {
+  const [w, setW] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
+  useEffect(() => {
+    const fn = () => setW(window.innerWidth);
+    window.addEventListener("resize", fn);
+    return () => window.removeEventListener("resize", fn);
+  }, []);
+  return { isMobile: w < 768, isDesktop: w >= 1200, width: w };
+}
+
+const NAV_TABS = [
+  {id:"dashboard",icon:"⊞", label:"Inicio"},
+  {id:"expenses", icon:"🧾",label:"Gastos"},
+  {id:"msi",      icon:"🔄",label:"MSI"},
+  {id:"goals",    icon:"🎯",label:"Metas"},
+  {id:"subs",     icon:"📲",label:"Suscripciones"},
+];
+
+function Sidebar({ tab, setTab, userName, onLogout }) {
+  return (
+    <div style={{width:220,flexShrink:0,background:C.card,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",padding:"24px 12px",gap:4,position:"sticky",top:0,height:"100vh",overflowY:"auto"}}>
+      <div style={{padding:"8px 12px 28px"}}>
+        <div style={{fontSize:22,fontWeight:900,color:C.text,letterSpacing:-0.5}}>💰 Finance</div>
+        <div style={{fontSize:12,color:C.sub,marginTop:2}}>Tracker</div>
+      </div>
+      {NAV_TABS.map(t=>{
+        const active=tab===t.id;
+        return (
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderRadius:12,border:"none",background:active?C.accentDim:"transparent",cursor:"pointer",width:"100%",textAlign:"left",transition:"background .15s",outline:active?`1px solid ${C.accent}44`:"none"}}>
+            <span style={{fontSize:18,lineHeight:1}}>{t.icon}</span>
+            <span style={{fontSize:14,fontWeight:active?700:500,color:active?C.accent:C.sub}}>{t.label}</span>
+          </button>
+        );
+      })}
+      <div style={{marginTop:"auto",padding:"12px 14px",borderTop:`1px solid ${C.border}`}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:6}}>{userName}</div>
+        <button onClick={onLogout} style={{fontSize:11,color:C.sub,background:"none",border:"none",cursor:"pointer",padding:0}}>Cerrar sesión →</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { isDesktop } = useBreakpoint();
   const [session, setSession]   = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [tab, setTab]           = useState("dashboard");
-
-  // Data state
   const [accounts,   setAccounts]   = useState([]);
   const [expenses,   setExpenses]   = useState([]);
   const [categories, setCategories] = useState([]);
@@ -2068,20 +2108,12 @@ export default function App() {
   const [transfers,  setTransfers]  = useState([]);
   const [dataLoading, setDataLoading] = useState(false);
 
-  // ── Auth listener ──
   useEffect(() => {
-    sb.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setAuthLoading(false);
-    });
-    const { data: { subscription } } = sb.auth.onAuthStateChange((_e, s) => {
-      setSession(s);
-      setAuthLoading(false);
-    });
+    sb.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false); });
+    const { data: { subscription } } = sb.auth.onAuthStateChange((_e, s) => { setSession(s); setAuthLoading(false); });
     return () => subscription.unsubscribe();
   }, []);
 
-  // ── Load all data when logged in ──
   const loadAll = useCallback(async () => {
     if (!session) return;
     setDataLoading(true);
@@ -2094,97 +2126,43 @@ export default function App() {
       sb.from("subscriptions").select("*").eq("active", true).order("name"),
       sb.from("transfers").select("*").order("date", { ascending: false }),
     ]);
-    // Map DB snake_case → camelCase for compatibility with existing components
-    setAccounts((accR.data||[]).map(a=>({
-      id:a.id, name:a.name, type:a.type, balance:Number(a.balance),
-      limit:a.credit_limit?Number(a.credit_limit):null, color:a.color,
-      cutDay:a.cut_day, payDay:a.pay_day,
-    })));
-    setCategories((catR.data||[]).map(c=>({
-      id:c.id, name:c.name, icon:c.icon, color:c.color, budget:Number(c.budget),
-    })));
-    setExpenses((expR.data||[]).map(e=>({
-      id:e.id, description:e.description, amount:Number(e.amount),
-      date:e.date, accountId:e.account_id, categoryId:e.category_id,
-      paymentDate:e.payment_date, isMSI:e.is_msi, msiPlanId:e.msi_plan_id,
-      msiIndex:e.msi_index, msiTotal:e.msi_total,
-      isTdcPayment:e.is_tdc_payment, isSubscription:e.is_subscription,
-      linkedGoalId:e.linked_goal_id,
-    })));
-    setGoals((gR.data||[]).map(g=>({
-      id:g.id, name:g.name, target:Number(g.target_amount),
-      current:Number(g.current_amount), icon:g.icon, color:g.color,
-    })));
-    setPlans((msiR.data||[]).map(p=>({
-      id:p.id, desc:p.description, total:Number(p.total_amount),
-      monthly:Number(p.monthly_payment), totalM:p.total_months,
-      paidM:p.paid_months, accountId:p.account_id, startDate:p.start_date,
-    })));
-    setSubs((subR.data||[]).map(s=>({
-      id:s.id, name:s.name, amount:Number(s.amount), frequency:s.frequency,
-      categoryId:s.category_id, accountId:s.account_id,
-      chargeDay:s.charge_day, active:s.active, color:"#7C6FFF",
-    })));
-    setTransfers((trR.data||[]).map(t=>({
-      id:t.id, type:t.type, amount:Number(t.amount), accountId:t.account_id,
-      counterparty:t.counterparty, date:t.date, notes:t.notes,
-    })));
+    setAccounts((accR.data||[]).map(a=>({ id:a.id, name:a.name, type:a.type, balance:Number(a.balance), limit:a.credit_limit?Number(a.credit_limit):null, color:a.color, cutDay:a.cut_day, payDay:a.pay_day })));
+    setCategories((catR.data||[]).map(c=>({ id:c.id, name:c.name, icon:c.icon, color:c.color, budget:Number(c.budget) })));
+    setExpenses((expR.data||[]).map(e=>({ id:e.id, description:e.description, amount:Number(e.amount), date:e.date, accountId:e.account_id, categoryId:e.category_id, paymentDate:e.payment_date, isMSI:e.is_msi, msiPlanId:e.msi_plan_id, msiIndex:e.msi_index, msiTotal:e.msi_total, isTdcPayment:e.is_tdc_payment, isSubscription:e.is_subscription, linkedGoalId:e.linked_goal_id, isMSIInstallment:e.is_msi })));
+    setGoals((gR.data||[]).map(g=>({ id:g.id, name:g.name, target:Number(g.target_amount), current:Number(g.current_amount), icon:g.icon, color:g.color })));
+    setPlans((msiR.data||[]).map(p=>({ id:p.id, desc:p.description, total:Number(p.total_amount), monthly:Number(p.monthly_payment), totalM:p.total_months, paidM:p.paid_months, accountId:p.account_id, startDate:p.start_date })));
+    setSubs((subR.data||[]).map(s=>({ id:s.id, name:s.name, amount:Number(s.amount), frequency:s.frequency, categoryId:s.category_id, accountId:s.account_id, chargeDay:s.charge_day, active:s.active, color:"#7C6FFF" })));
+    setTransfers((trR.data||[]).map(t=>({ id:t.id, type:t.type, amount:Number(t.amount), accountId:t.account_id, counterparty:t.counterparty, date:t.date, notes:t.notes })));
     setDataLoading(false);
   }, [session]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // ── Account helpers (write to Supabase + update local state) ──
   const addAccount = async (data) => {
-    const { data: row } = await sb.from("accounts").insert({
-      user_id: session.user.id,
-      name: data.name, type: data.type, balance: data.balance ?? 0,
-      credit_limit: data.limit ?? null, color: data.color,
-      cut_day: data.cutDay ?? null, pay_day: data.payDay ?? null,
-    }).select().single();
-    if (row) setAccounts(p=>[...p, { id:row.id, name:row.name, type:row.type, balance:Number(row.balance), limit:row.credit_limit?Number(row.credit_limit):null, color:row.color, cutDay:row.cut_day, payDay:row.pay_day }]);
+    const { data: row } = await sb.from("accounts").insert({ user_id:session.user.id, name:data.name, type:data.type, balance:data.balance??0, credit_limit:data.limit??null, color:data.color, cut_day:data.cutDay??null, pay_day:data.payDay??null }).select().single();
+    if (row) setAccounts(p=>[...p,{ id:row.id, name:row.name, type:row.type, balance:Number(row.balance), limit:row.credit_limit?Number(row.credit_limit):null, color:row.color, cutDay:row.cut_day, payDay:row.pay_day }]);
   };
   const updateAccount = async (updated) => {
-    await sb.from("accounts").update({
-      name:updated.name, type:updated.type, balance:updated.balance,
-      credit_limit:updated.limit??null, color:updated.color,
-      cut_day:updated.cutDay??null, pay_day:updated.payDay??null,
-    }).eq("id", updated.id);
+    await sb.from("accounts").update({ name:updated.name, type:updated.type, balance:updated.balance, credit_limit:updated.limit??null, color:updated.color, cut_day:updated.cutDay??null, pay_day:updated.payDay??null }).eq("id", updated.id);
     setAccounts(p=>p.map(a=>a.id===updated.id?updated:a));
   };
   const deleteAccount = async (id) => {
     await sb.from("accounts").delete().eq("id", id);
     setAccounts(p=>p.filter(a=>a.id!==id));
   };
-
   const handleLogout = async () => {
     await sb.auth.signOut();
-    setAccounts([]); setExpenses([]); setCategories([]);
-    setGoals([]); setPlans([]); setSubs([]); setTransfers([]);
+    setAccounts([]); setExpenses([]); setCategories([]); setGoals([]); setPlans([]); setSubs([]); setTransfers([]);
   };
 
-  // ── Loading / Auth gate ──
-  if (authLoading) return (
-    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{color:C.accent,fontSize:32}}>💰</div>
-    </div>
-  );
-
+  if (authLoading) return <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:C.accent,fontSize:32}}>💰</div></div>;
   if (!session) return <AuthScreen />;
 
   const userName = session.user.user_metadata?.full_name || session.user.email?.split("@")[0] || "Usuario";
 
-  const screenProps = {
-    expenses, setExpenses, accounts, setAccounts,
-    goals, setGoals, plans, setPlans, subs, setSubs,
-    categories, setCategories, transfers, setTransfers,
-    onAddAccount: addAccount, onUpdateAccount: updateAccount, onDeleteAccount: deleteAccount,
-    session, reloadAll: loadAll,
-  };
-
   const screen = (
     <>
-      {tab==="dashboard" && <Dashboard {...screenProps}/>}
+      {tab==="dashboard" && <Dashboard expenses={expenses} accounts={accounts} setAccounts={setAccounts} categories={categories} setCategories={setCategories} transfers={transfers} setTransfers={setTransfers} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount} session={session} reloadAll={loadAll}/>}
       {tab==="expenses"  && <Expenses  expenses={expenses} setExpenses={setExpenses} accounts={accounts} setAccounts={setAccounts} subs={subs} plans={plans} setPlans={setPlans} categories={categories} goals={goals} setGoals={setGoals} session={session} reloadAll={loadAll}/>}
       {tab==="msi"       && <MSI       plans={plans} setPlans={setPlans} accounts={accounts} session={session} reloadAll={loadAll}/>}
       {tab==="goals"     && <Goals     goals={goals} setGoals={setGoals} accounts={accounts} setAccounts={setAccounts} session={session} reloadAll={loadAll}/>}
@@ -2192,14 +2170,7 @@ export default function App() {
     </>
   );
 
-  const globalStyles = `
-    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-    body{margin:0;background:${C.bg};}
-    input::placeholder{color:${C.muted};}
-    input{caret-color:${C.accent};}
-    input[type=date]{color-scheme:dark;}
-    @keyframes slideUp{from{transform:translateY(100%);opacity:0;}to{transform:translateY(0);opacity:1;}}
-  `;
+  const globalStyles = `*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}body{margin:0;background:${C.bg};}input::placeholder{color:${C.muted};}input{caret-color:${C.accent};}input[type=date]{color-scheme:dark;}@keyframes slideUp{from{transform:translateY(100%);opacity:0;}to{transform:translateY(0);opacity:1;}}`;
 
   if (isDesktop) return (
     <div style={{display:"flex",minHeight:"100vh",background:C.bg,fontFamily:"-apple-system,'SF Pro Display','Segoe UI',sans-serif"}}>
@@ -2237,149 +2208,3 @@ export default function App() {
     </div>
   );
 }
-
-
-// ─── SIDEBAR (desktop only) ───────────────────────────────────────────────────
-const TABS = [
-  {id:"dashboard",icon:"⊞", label:"Inicio"},
-  {id:"expenses", icon:"🧾",label:"Gastos"},
-  {id:"msi",      icon:"🔄",label:"MSI"},
-  {id:"goals",    icon:"🎯",label:"Metas"},
-  {id:"subs",     icon:"📲",label:"Suscripciones"},
-];
-
-function Sidebar({ tab, setTab }) {
-  return (
-    <div style={{
-      width:220, flexShrink:0,
-      background:C.card, borderRight:`1px solid ${C.border}`,
-      display:"flex", flexDirection:"column",
-      padding:"24px 12px", gap:4,
-      position:"sticky", top:0, height:"100vh", overflowY:"auto",
-    }}>
-      <div style={{padding:"8px 12px 28px"}}>
-        <div style={{fontSize:22,fontWeight:900,color:C.text,letterSpacing:-0.5}}>💰 Finance</div>
-        <div style={{fontSize:12,color:C.sub,marginTop:2}}>Tracker</div>
-      </div>
-      {TABS.map(t=>{
-        const active=tab===t.id;
-        return (
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{
-            display:"flex",alignItems:"center",gap:12,
-            padding:"10px 14px",borderRadius:12,border:"none",
-            background:active?C.accentDim:"transparent",
-            cursor:"pointer",width:"100%",textAlign:"left",
-            transition:"background .15s",
-            outline:active?`1px solid ${C.accent}44`:"none",
-          }}>
-            <span style={{fontSize:18,lineHeight:1}}>{t.icon}</span>
-            <span style={{fontSize:14,fontWeight:active?700:500,color:active?C.accent:C.sub}}>{t.label}</span>
-          </button>
-        );
-      })}
-      <div style={{marginTop:"auto",padding:"12px 14px"}}>
-        <div style={{fontSize:11,color:C.muted,textTransform:"capitalize"}}>
-          {new Date().toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long"})}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── APP ──────────────────────────────────────────────────────────────────────
-export default function App() {
-  const { isDesktop } = useBreakpoint();
-  const [tab, setTab] = useState("dashboard");
-  const [accounts, setAccounts] = useState(INIT_ACCOUNTS.map(a=>({...a})));
-  const [expenses, setExpenses] = useState(INIT_EXPENSES.map(e=>{
-    const acc = INIT_ACCOUNTS.find(a=>a.id===e.accountId);
-    const pd = acc?.type==="credit"&&acc.cutDay&&acc.payDay ? calcPaymentDate(e.date,acc.cutDay,acc.payDay) : null;
-    return {...e, paymentDate:pd};
-  }));
-  const [categories, setCategories] = useState(INIT_CATEGORIES.map(c=>({...c})));
-  const [goals, setGoals] = useState(INIT_GOALS.map(g=>({...g})));
-  const [plans, setPlans] = useState(INIT_MSI.map(p=>({...p})));
-  const [subs, setSubs] = useState(INIT_SUBS.map(s=>({...s})));
-  const [transfers, setTransfers] = useState([]);
-
-  useEffect(()=>{
-    if(!("Notification" in window)) return;
-    const request = async () => {
-      const perm = await Notification.requestPermission();
-      if(perm !== "granted") return;
-      accounts.filter(a=>a.type==="credit"&&a.payDay).forEach(acc=>{
-        if(daysUntil(nextOccurrence(acc.payDay)) === 1) {
-          new Notification(`💳 Pago ${acc.name} mañana`, {
-            body:`Tu tarjeta ${acc.name} vence mañana (día ${acc.payDay}). Saldo: ${mxn(Math.abs(acc.balance))}`,
-            tag:`pay-${acc.id}`,
-          });
-        }
-      });
-    };
-    request();
-  }, [accounts]);
-
-  const addAccount    = (data) => { const id=accounts.reduce((m,a)=>Math.max(m,a.id),0)+1; setAccounts(p=>[...p,{id,...data}]); };
-  const updateAccount = (u)    => { setAccounts(p=>p.map(a=>a.id===u.id?u:a)); };
-  const deleteAccount = (id)   => { setAccounts(p=>p.filter(a=>a.id!==id)); };
-
-  const screen = <>
-    {tab==="dashboard" && <Dashboard expenses={expenses} accounts={accounts} setAccounts={setAccounts} categories={categories} setCategories={setCategories} transfers={transfers} setTransfers={setTransfers} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount}/>}
-    {tab==="expenses"  && <Expenses  expenses={expenses} setExpenses={setExpenses} accounts={accounts} setAccounts={setAccounts} subs={subs} plans={plans} setPlans={setPlans} categories={categories} goals={goals} setGoals={setGoals}/>}
-    {tab==="msi"       && <MSI       plans={plans} setPlans={setPlans} accounts={accounts}/>}
-    {tab==="goals"     && <Goals     goals={goals} setGoals={setGoals} accounts={accounts} setAccounts={setAccounts}/>}
-    {tab==="subs"      && <Subscriptions subs={subs} setSubs={setSubs} accounts={accounts} expenses={expenses} setExpenses={setExpenses} categories={categories}/>}
-  </>;
-
-  const globalStyles = `
-    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-    body{margin:0;background:${C.bg};}
-    input::placeholder{color:${C.muted};}
-    input{caret-color:${C.accent};}
-    input[type=date]{color-scheme:dark;}
-    @keyframes slideUp{from{transform:translateY(100%);opacity:0;}to{transform:translateY(0);opacity:1;}}
-  `;
-
-  // ── DESKTOP ──
-  if (isDesktop) return (
-    <div style={{display:"flex",minHeight:"100vh",background:C.bg,fontFamily:"-apple-system,'SF Pro Display','Segoe UI',sans-serif"}}>
-      <style>{globalStyles + `
-        ::-webkit-scrollbar{width:6px;}
-        ::-webkit-scrollbar-track{background:${C.bg};}
-        ::-webkit-scrollbar-thumb{background:${C.border};border-radius:3px;}
-      `}</style>
-      <Sidebar tab={tab} setTab={setTab}/>
-      <div style={{flex:1,display:"flex",justifyContent:"center",overflowY:"auto",minHeight:"100vh"}}>
-        <div style={{width:"100%",maxWidth:920,padding:"32px 40px"}}>
-          {screen}
-          <div style={{height:40}}/>
-        </div>
-      </div>
-    </div>
-  );
-
-  // ── MOBILE ──
-  return (
-    <div style={{background:C.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",position:"relative",fontFamily:"-apple-system,'SF Pro Display','Segoe UI',sans-serif"}}>
-      <style>{globalStyles + `::-webkit-scrollbar{display:none;}`}</style>
-      <div style={{height:44,background:C.bg}}/>
-      <div style={{paddingBottom:85}}>{screen}</div>
-      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:C.card,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 4px 22px",zIndex:100,backdropFilter:"blur(20px)"}}>
-        {TABS.map(t=>{
-          const active=tab===t.id;
-          return (
-            <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"5px 2px",background:"none",border:"none",cursor:"pointer",borderRadius:12}}>
-              <div style={{padding:"3px 12px",borderRadius:9,background:active?C.accentDim:"transparent",transition:"background .2s"}}>
-                <span style={{fontSize:20,lineHeight:1}}>{t.icon}</span>
-              </div>
-              <span style={{fontSize:10,fontWeight:active?800:500,color:active?C.accent:C.muted,transition:"color .2s"}}>{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-
-
