@@ -1657,16 +1657,25 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
   const [showModal, setShowModal] = useState(false);
   const [openActive, setOpenActive] = useState(true);
   const [openDone, setOpenDone] = useState(false);
-  const [form, setForm] = useState({desc:"",total:"",monthly:"",months:"12",accountId:accounts[0]?.id||""});
+  const [form, setForm] = useState({desc:"",total:"",monthly:"",months:"12",accountId:accounts[0]?.id||"",startDate:today()});
 
   const active = plans.filter(p=>p.paidM<p.totalM);
   const done   = plans.filter(p=>p.paidM>=p.totalM);
   const totalPending = active.reduce((s,p)=>s+(p.totalM-p.paidM)*p.monthly,0);
 
+  const calcPaidMonths = (startDate, totalMonths) => {
+    if (!startDate) return 0;
+    const start = new Date(startDate + "T00:00:00");
+    const now = new Date();
+    const elapsed = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+    return Math.max(0, Math.min(elapsed, parseInt(totalMonths) || 0));
+  };
+
   const save=async()=>{
     if(!form.desc||!form.total||!form.monthly)return;
-    await sb.from("msi_plans").insert({ user_id: session?.user?.id, description: form.desc.trim(), total_amount: parseFloat(form.total), monthly_payment: parseFloat(form.monthly), total_months: parseInt(form.months), paid_months: 0, account_id: form.accountId||null, start_date: today() });
-    setForm({desc:"",total:"",monthly:"",months:"12",accountId:accounts[0]?.id||""});
+    const paid = calcPaidMonths(form.startDate, form.months);
+    await sb.from("msi_plans").insert({ user_id: session?.user?.id, description: form.desc.trim(), total_amount: parseFloat(form.total), monthly_payment: parseFloat(form.monthly), total_months: parseInt(form.months), paid_months: paid, account_id: form.accountId||null, start_date: form.startDate||today() });
+    setForm({desc:"",total:"",monthly:"",months:"12",accountId:accounts[0]?.id||"",startDate:today()});
     setShowModal(false);
     if(reloadAll) await reloadAll();
   };
@@ -1678,11 +1687,12 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
     return (
       <div style={{background:C.card,borderRadius:16,padding:14,border:`1px solid ${done?C.green+"44":C.border}`,marginBottom:8}}>
         <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:10}}>
-          <div style={{width:40,height:40,borderRadius:11,background:done?C.greenDim:C.accentDim,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{done?"✅":"🔄"}</div>
+          <div style={{width:40,height:40,borderRadius:11,background:done?C.greenDim:(acc?.color||C.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{done?"✅":"🔄"}</div>
           <div style={{flex:1}}>
             <div style={{fontSize:14,fontWeight:800,color:C.text}}>{plan.desc}</div>
-            <div style={{fontSize:11,color:C.sub,marginTop:1}}>
-              {acc?.name||"Sin cuenta"}{plan.startDate&&<span style={{color:C.muted}}> · {fmtDateShort(plan.startDate)}</span>}
+            <div style={{display:"flex",alignItems:"center",gap:5,marginTop:4,flexWrap:"wrap"}}>
+              {acc ? <Tag color={acc.color}>💳 {acc.name}</Tag> : <span style={{fontSize:10,color:C.muted}}>Sin tarjeta</span>}
+              {plan.startDate&&<span style={{fontSize:10,color:C.muted}}>{fmtDateShort(plan.startDate)}</span>}
             </div>
           </div>
           <div style={{textAlign:"right"}}>
@@ -1778,6 +1788,38 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
         <Field label="Número de MSI">
           <ChipSelect options={["3","6","9","12","18","24"]} value={form.months} onChange={v=>setForm(f=>({...f,months:v}))}/>
         </Field>
+        <Field label="Fecha de compra" hint="¿Cuándo realizaste la compra?">
+          <Input value={form.startDate} onChange={v=>setForm(f=>({...f,startDate:v}))} type="date"/>
+        </Field>
+        {(()=>{
+          const paid = calcPaidMonths(form.startDate, form.months);
+          const totalM = parseInt(form.months)||0;
+          const rem = Math.max(0, totalM - paid);
+          const monthly = parseFloat(form.monthly)||0;
+          return (
+            <div style={{background:C.elevated,borderRadius:11,padding:"11px 13px",marginBottom:14,border:`1px solid ${paid>0?C.orange+"55":C.border}`,borderLeft:`3px solid ${paid>0?C.orange:C.border}`}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.sub,textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Resumen estimado</div>
+              <div style={{display:"flex",justifyContent:"space-between"}}>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:16,fontWeight:900,color:C.green}}>{paid}</div>
+                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Pagados</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:16,fontWeight:900,color:C.orange}}>{rem}</div>
+                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Restantes</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:16,fontWeight:900,color:C.text}}>{totalM}</div>
+                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Total MSI</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:14,fontWeight:900,color:rem>0?C.red:C.green}}>{mxn(rem*monthly,true)}</div>
+                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:.3}}>Pendiente</div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         <Field label="Tarjeta">
           <ChipSelect options={accounts.filter(a=>a.type==="credit")} value={form.accountId} onChange={v=>setForm(f=>({...f,accountId:v}))} getColor={a=>a.color}/>
         </Field>
