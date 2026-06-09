@@ -620,9 +620,9 @@ function Dashboard({expenses, accounts, setAccounts, categories, setCategories, 
       </SectionBody>
 
       {/* TRANSFERENCIAS RECIBIDAS */}
-      <SectionHead label="📥 Transferencias Recibidas" k="transfers" count={transfers.length} color={C.green} onAdd={()=>{setTransForm(emptyTransForm);setShowAddTrans(true);}} addLabel="Registrar"/>
+      <SectionHead label="📥 Transferencias Recibidas" k="transfers" count={transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).length} color={C.green} onAdd={()=>{setTransForm(emptyTransForm);setShowAddTrans(true);}} addLabel="Registrar"/>
       <SectionBody k="transfers" color={C.green}>
-        {transfers.slice(0,8).map(t=>{const acc=accounts.find(a=>a.id===t.accountId);return(
+        {transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).slice(0,8).map(t=>{const acc=accounts.find(a=>a.id===t.accountId);return(
           <div key={t.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
             <span style={{fontSize:18}}>📥</span>
             <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:C.text}}>De: <span style={{color:C.green}}>{t.counterparty}</span></div><div style={{display:"flex",gap:5,marginTop:2}}>{acc&&<Tag color={acc.color}>{acc.name}</Tag>}<span style={{fontSize:10,color:C.muted}}>{fmtDateShort(t.date)}</span></div></div>
@@ -1546,8 +1546,11 @@ function Goals({goals, setGoals, accounts, setAccounts, transfers, session, relo
 
   const goalWithdrawals = useMemo(() => {
     const map = {};
-    (transfers||[]).filter(t=>t.type==="goal_withdrawal").forEach(t => {
-      const gid = t.notes;
+    (transfers||[]).forEach(t => {
+      if (!t.counterparty?.startsWith("__goal__")) return;
+      const parts = t.counterparty.split("__").filter(Boolean);
+      const gid = parts[1];
+      if (!gid) return;
       if (!map[gid]) map[gid] = [];
       map[gid].push(t);
     });
@@ -1586,7 +1589,7 @@ function Goals({goals, setGoals, accounts, setAccounts, transfers, session, relo
     await sb.from("goals").update({ current_amount: Math.max(0, withdrawGoal.current - amt) }).eq("id", withdrawGoal.id);
     const acc = accounts.find(a=>a.id===targetAccountId);
     if (acc) await sb.from("accounts").update({ balance: acc.balance + amt }).eq("id", targetAccountId);
-    await sb.from("transfers").insert({ user_id: session?.user?.id, type: "goal_withdrawal", amount: amt, account_id: targetAccountId, counterparty: withdrawGoal.name, date: today(), notes: String(withdrawGoal.id) });
+    await sb.from("transfers").insert({ user_id: session?.user?.id, type: "sent", amount: amt, account_id: targetAccountId, counterparty: `__goal__${withdrawGoal.id}__${withdrawGoal.name}`, date: today(), notes: `Retiro de meta: ${withdrawGoal.name}` });
     setShowWithdraw(false); setWithdrawGoal(null); setWithdrawAmt("");
     if (reloadAll) await reloadAll();
   };
