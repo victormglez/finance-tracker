@@ -754,6 +754,18 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
   const [showModal, setShowModal] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
   const [editDate, setEditDate] = useState(null);
+  const [paidPayments, setPaidPayments] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("paidTdcPayments")||"[]")); }
+    catch { return new Set(); }
+  });
+  const togglePaid = (payKey) => {
+    setPaidPayments(prev => {
+      const next = new Set(prev);
+      next.has(payKey) ? next.delete(payKey) : next.add(payKey);
+      localStorage.setItem("paidTdcPayments", JSON.stringify([...next]));
+      return next;
+    });
+  };
   const [nextId, setNextId] = useState(200);
   const [nextPlanId, setNextPlanId] = useState(100);
   const [showPayTDC, setShowPayTDC] = useState(false);
@@ -985,30 +997,50 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
               {isOpen&&(
                 <div style={{background:C.card,border:`1px solid ${isCurrent?C.accent+"33":C.border}`,borderTop:"none",borderRadius:"0 0 14px 14px",padding:"8px 12px 12px"}}>
 
-                  {/* Payment-due rows — only shown when today >= paymentDate */}
+                  {/* Payment-due rows — one card per credit card */}
                   {visiblePayments.length>0&&(
                     <div style={{marginBottom:4}}>
-                      <div style={{fontSize:10,fontWeight:800,color:C.red,textTransform:"uppercase",letterSpacing:1,margin:"10px 0 6px",paddingLeft:2,display:"flex",alignItems:"center",gap:5}}>
+                      <div style={{fontSize:10,fontWeight:800,color:C.red,textTransform:"uppercase",letterSpacing:1,margin:"10px 0 6px",paddingLeft:2}}>
                         💳 Pagos de Tarjeta
                       </div>
                       {visiblePayments.map(p=>{
                         const acc = accounts.find(a=>a.id===p.accountId);
                         const d = daysUntil(p.paymentDate);
                         const overdue = d < 0;
+                        const paid = paidPayments.has(p.__payKey);
+                        const cardColor = acc?.color || C.accent;
                         return (
-                          <div key={p.__payKey} style={{background:overdue?C.redDim:C.elevated,borderRadius:13,padding:"11px 13px",marginBottom:7,display:"flex",alignItems:"center",gap:11,border:`1px solid ${overdue?C.red+"66":C.orange+"55"}`}}>
-                            <div style={{width:38,height:38,borderRadius:10,background:(acc?.color||C.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>💳</div>
-                            <div style={{flex:1}}>
-                              <div style={{fontSize:13,fontWeight:800,color:C.text}}>
-                                Pago {acc?.name||"TDC"}
-                                <span style={{fontSize:10,color:C.sub,fontWeight:400,marginLeft:4}}>· {p.items.length} cargos</span>
+                          <div key={p.__payKey} style={{
+                            borderRadius:14,marginBottom:8,overflow:"hidden",
+                            border:`1px solid ${paid?C.green+"55":overdue?C.red+"55":C.orange+"55"}`,
+                            background: paid ? C.greenDim : overdue ? C.redDim : C.elevated,
+                          }}>
+                            {/* Card color bar */}
+                            <div style={{height:4,background:paid?C.green:cardColor,opacity:paid?1:0.7}}/>
+                            <div style={{padding:"11px 13px",display:"flex",alignItems:"center",gap:11}}>
+                              <div style={{width:38,height:38,borderRadius:10,background:cardColor+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0,border:`1.5px solid ${cardColor}44`}}>💳</div>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:13,fontWeight:800,color:paid?C.green:C.text,display:"flex",alignItems:"center",gap:5}}>
+                                  <span style={{color:cardColor,fontWeight:900}}>{acc?.name||"TDC"}</span>
+                                  <span style={{fontSize:10,color:C.sub,fontWeight:400}}>· {p.items.length} cargo{p.items.length!==1?"s":""}</span>
+                                </div>
+                                <div style={{fontSize:10,fontWeight:700,marginTop:2,color:paid?C.green:overdue?C.red:C.orange}}>
+                                  {paid ? "✅ Pagado" : overdue ? `⚠️ Venció hace ${Math.abs(d)} día${Math.abs(d)!==1?"s":""}` : d===0 ? "🔴 Vence hoy" : `📅 Vence el ${fmtDateShort(p.paymentDate)}`}
+                                </div>
                               </div>
-                              <div style={{fontSize:10,color:overdue?C.red:C.orange,fontWeight:700,marginTop:2}}>
-                                {overdue ? `⚠️ Venció hace ${Math.abs(d)} día${Math.abs(d)!==1?"s":""}` : d===0 ? "🔴 Vence hoy" : `📅 Venció el ${fmtDateShort(p.paymentDate)}`}
+                              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
+                                <div style={{fontSize:15,fontWeight:900,color:paid?C.green:overdue?C.red:C.text,textDecoration:paid?"line-through":"none"}}>{mxn(p.total)}</div>
+                                <button onClick={()=>togglePaid(p.__payKey)} style={{
+                                  background: paid ? C.green : "transparent",
+                                  border: `2px solid ${paid ? C.green : C.border}`,
+                                  borderRadius:8, width:32, height:32,
+                                  display:"flex",alignItems:"center",justifyContent:"center",
+                                  cursor:"pointer", fontSize:15, flexShrink:0,
+                                  transition:"all .15s",
+                                }}>
+                                  {paid ? <span style={{color:"#fff",fontWeight:900}}>✓</span> : <span style={{color:C.muted}}>○</span>}
+                                </button>
                               </div>
-                            </div>
-                            <div style={{textAlign:"right"}}>
-                              <div style={{fontSize:15,fontWeight:900,color:overdue?C.red:C.text}}>{mxn(p.total)}</div>
                             </div>
                           </div>
                         );
