@@ -526,6 +526,23 @@ function UpcomingPayments({expenses, accounts, subs}) {
   );
 }
 
+function SectionHead({label, count, extra, color=C.accent, onAdd, addLabel, isOpen, onToggle}) {
+  return (
+    <div style={{display:"flex",alignItems:"center",marginBottom:isOpen?0:10}}>
+      <button onClick={onToggle} style={{flex:1,display:"flex",alignItems:"center",gap:8,background:isOpen?color+"11":C.card,border:`1px solid ${isOpen?color+"55":C.border}`,borderRadius:isOpen?"14px 14px 0 0":14,padding:"11px 14px",cursor:"pointer"}}>
+        <span style={{flex:1,textAlign:"left",fontSize:13,fontWeight:800,color:isOpen?color:C.text}}>{label}</span>
+        {count!=null&&<span style={{fontSize:10,background:C.elevated,color:C.sub,padding:"2px 7px",borderRadius:99,fontWeight:700}}>{count}</span>}
+        {extra&&<span style={{fontSize:11,color:C.sub,marginRight:4}}>{extra}</span>}
+        <span style={{fontSize:13,color:C.sub,transition:"transform .2s",transform:isOpen?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+      </button>
+      {onAdd&&<button onClick={onAdd} style={{marginLeft:6,background:color,border:"none",borderRadius:10,padding:"8px 10px",color:"#fff",fontSize:11,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>+ {addLabel}</button>}
+    </div>
+  );
+}
+function SectionBody({isOpen, color=C.accent, children}) {
+  return isOpen ? (<div style={{background:C.card,border:`1px solid ${color}33`,borderTop:"none",borderRadius:"0 0 14px 14px",padding:"10px 12px 12px",marginBottom:12}}>{children}</div>) : null;
+}
+
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 function Dashboard({expenses, accounts, setAccounts, categories, setCategories, transfers, setTransfers, onAddAccount, onUpdateAccount, onDeleteAccount, session, reloadAll}) {
   const currentMonth = getCurrentMonth();
@@ -579,18 +596,6 @@ function Dashboard({expenses, accounts, setAccounts, categories, setCategories, 
   const ColorPicker=({value,onChange,cols})=>(<div style={{display:"flex",flexWrap:"wrap",gap:7}}>{(cols||CAT_COLORS).map(col=><button key={col} onClick={()=>onChange(col)} style={{width:32,height:32,borderRadius:16,background:col,border:"none",cursor:"pointer",outline:value===col?"3px solid #fff":"none",outlineOffset:2}}/>)}</div>);
   const IconPicker=({value,onChange,color,icons})=>(<div style={{display:"flex",flexWrap:"wrap",gap:6}}>{(icons||CAT_ICONS).map(ic=><button key={ic} onClick={()=>onChange(ic)} style={{width:38,height:38,borderRadius:9,border:"none",background:value===ic?color+"44":C.elevated,fontSize:18,cursor:"pointer",outline:value===ic?`2px solid ${color}`:`1px solid ${C.border}`}}>{ic}</button>)}</div>);
 
-  const SectionHead=({label,k,count,extra,color=C.accent,onAdd,addLabel})=>(
-    <div style={{display:"flex",alignItems:"center",marginBottom:openSections[k]?0:10}}>
-      <button onClick={()=>toggle(k)} style={{flex:1,display:"flex",alignItems:"center",gap:8,background:openSections[k]?color+"11":C.card,border:`1px solid ${openSections[k]?color+"55":C.border}`,borderRadius:openSections[k]?"14px 14px 0 0":14,padding:"11px 14px",cursor:"pointer"}}>
-        <span style={{flex:1,textAlign:"left",fontSize:13,fontWeight:800,color:openSections[k]?color:C.text}}>{label}</span>
-        {count!=null&&<span style={{fontSize:10,background:C.elevated,color:C.sub,padding:"2px 7px",borderRadius:99,fontWeight:700}}>{count}</span>}
-        {extra&&<span style={{fontSize:11,color:C.sub,marginRight:4}}>{extra}</span>}
-        <span style={{fontSize:13,color:C.sub,transition:"transform .2s",transform:openSections[k]?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
-      </button>
-      {onAdd&&<button onClick={onAdd} style={{marginLeft:6,background:color,border:"none",borderRadius:10,padding:"8px 10px",color:"#fff",fontSize:11,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>+ {addLabel}</button>}
-    </div>
-  );
-  const SectionBody=({k,color=C.accent,children})=>openSections[k]?(<div style={{background:C.card,border:`1px solid ${color}33`,borderTop:"none",borderRadius:"0 0 14px 14px",padding:"10px 12px 12px",marginBottom:12}}>{children}</div>):null;
 
   return (
     <div style={{padding:"0 16px 20px",maxWidth:480,margin:"0 auto"}}>
@@ -604,25 +609,25 @@ function Dashboard({expenses, accounts, setAccounts, categories, setCategories, 
       </div>
 
       {/* CUENTAS */}
-      <SectionHead label="🏦 Cuentas" k="accounts" count={accounts.length} color={C.accent} onAdd={()=>setShowAddAcc(true)} addLabel="Agregar"/>
-      <SectionBody k="accounts" color={C.accent}>
+      <SectionHead label="🏦 Cuentas" isOpen={openSections.accounts} onToggle={()=>toggle("accounts")} count={accounts.length} color={C.accent} onAdd={()=>setShowAddAcc(true)} addLabel="Agregar"/>
+      <SectionBody isOpen={openSections.accounts} color={C.accent}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           {accounts.map(acc=><AccountCard key={acc.id} acc={acc} onClick={()=>setEditingAcc(acc)}/>)}
         </div>
       </SectionBody>
 
       {/* GASTO MENSUAL */}
-      <SectionHead label="📊 Gasto Mensual" k="chart" extra={mxn(monthTotal,true)} color={C.orange}/>
-      <SectionBody k="chart" color={C.orange}>
+      <SectionHead label="📊 Gasto Mensual" isOpen={openSections.chart} onToggle={()=>toggle("chart")} extra={mxn(monthTotal,true)} color={C.orange}/>
+      <SectionBody isOpen={openSections.chart} color={C.orange}>
         <div style={{display:"flex",alignItems:"flex-end",gap:6,height:72}}>
           {MONTHLY_CHART.map((m,i)=>{const h=(m.total/maxBar)*100;const last=i===MONTHLY_CHART.length-1;return(<div key={m.month} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}><div style={{fontSize:9,color:C.sub,fontWeight:700}}>{mxn(m.total,true)}</div><div style={{width:"100%",height:`${h}%`,background:last?C.accent:"#2a2a50",borderRadius:"3px 3px 0 0",minHeight:4}}/><div style={{fontSize:9,color:last?C.accent:C.muted,fontWeight:700}}>{m.month}</div></div>);})}
         </div>
       </SectionBody>
 
       {/* TRANSFERENCIAS RECIBIDAS */}
-      <SectionHead label="📥 Transferencias Recibidas" k="transfers" count={transfers.length} color={C.green} onAdd={()=>{setTransForm(emptyTransForm);setShowAddTrans(true);}} addLabel="Registrar"/>
-      <SectionBody k="transfers" color={C.green}>
-        {transfers.slice(0,8).map(t=>{const acc=accounts.find(a=>a.id===t.accountId);return(
+      <SectionHead label="📥 Transferencias Recibidas" isOpen={openSections.transfers} onToggle={()=>toggle("transfers")} count={transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).length} color={C.green} onAdd={()=>{setTransForm(emptyTransForm);setShowAddTrans(true);}} addLabel="Registrar"/>
+      <SectionBody isOpen={openSections.transfers} color={C.green}>
+        {transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).slice(0,8).map(t=>{const acc=accounts.find(a=>a.id===t.accountId);return(
           <div key={t.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
             <span style={{fontSize:18}}>📥</span>
             <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:C.text}}>De: <span style={{color:C.green}}>{t.counterparty}</span></div><div style={{display:"flex",gap:5,marginTop:2}}>{acc&&<Tag color={acc.color}>{acc.name}</Tag>}<span style={{fontSize:10,color:C.muted}}>{fmtDateShort(t.date)}</span></div></div>
@@ -633,8 +638,8 @@ function Dashboard({expenses, accounts, setAccounts, categories, setCategories, 
       </SectionBody>
 
       {/* CATEGORÍAS */}
-      <SectionHead label="🏷️ Categorías" k="cats" count={categories.length} color="#FF9800" onAdd={()=>{setCatForm(emptyCatForm);setEditingCat(null);setShowAddCat(true);}} addLabel="Nueva"/>
-      <SectionBody k="cats" color="#FF9800">
+      <SectionHead label="🏷️ Categorías" isOpen={openSections.cats} onToggle={()=>toggle("cats")} count={categories.length} color="#FF9800" onAdd={()=>{setCatForm(emptyCatForm);setEditingCat(null);setShowAddCat(true);}} addLabel="Nueva"/>
+      <SectionBody isOpen={openSections.cats} color="#FF9800">
         {catBreakdown.map(cat=>{
           const pct=cat.budget>0?(cat.spent/cat.budget)*100:0;
           const over=pct>100;
@@ -1539,6 +1544,7 @@ function Goals({goals, setGoals, accounts, setAccounts, goalWithdrawals, session
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [withdrawGoal, setWithdrawGoal] = useState(null);
   const [withdrawAmt, setWithdrawAmt] = useState("");
+  const [withdrawConcept, setWithdrawConcept] = useState("");
   const [editForm, setEditForm] = useState({name:"",target:"",current:"",icon:"🎯",color:"#00D08A"});
   const [addForm, setAddForm] = useState({name:"",target:"",current:"0",icon:"🎯",color:"#00D08A"});
   const [nextId, setNextId] = useState(20);
@@ -1577,7 +1583,7 @@ function Goals({goals, setGoals, accounts, setAccounts, goalWithdrawals, session
     if (reloadAll) await reloadAll();
   };
 
-  const openWithdraw = (goal) => { setWithdrawGoal(goal); setWithdrawAmt(""); setShowWithdraw(true); };
+  const openWithdraw = (goal) => { setWithdrawGoal(goal); setWithdrawAmt(""); setWithdrawConcept(""); setShowWithdraw(true); };
 
   const doWithdraw = async (targetAccountId) => {
     const amt = parseFloat(withdrawAmt);
@@ -1585,8 +1591,8 @@ function Goals({goals, setGoals, accounts, setAccounts, goalWithdrawals, session
     await sb.from("goals").update({ current_amount: Math.max(0, withdrawGoal.current - amt) }).eq("id", withdrawGoal.id);
     const acc = accounts.find(a=>a.id===targetAccountId);
     if (acc) await sb.from("accounts").update({ balance: acc.balance + amt }).eq("id", targetAccountId);
-    await sb.from("goal_withdrawals").insert({ user_id: session?.user?.id, goal_id: withdrawGoal.id, account_id: targetAccountId, amount: amt, date: today() });
-    setShowWithdraw(false); setWithdrawGoal(null); setWithdrawAmt("");
+    await sb.from("goal_withdrawals").insert({ user_id: session?.user?.id, goal_id: withdrawGoal.id, account_id: targetAccountId, amount: amt, date: today(), concept: withdrawConcept.trim()||null });
+    setShowWithdraw(false); setWithdrawGoal(null); setWithdrawAmt(""); setWithdrawConcept("");
     if (reloadAll) await reloadAll();
   };
 
@@ -1666,9 +1672,9 @@ function Goals({goals, setGoals, accounts, setAccounts, goalWithdrawals, session
                           <div key={r.id||i} style={{display:"flex",alignItems:"center",gap:10,background:C.elevated,borderRadius:10,padding:"8px 10px",border:`1px solid ${C.border}`}}>
                             <div style={{width:30,height:30,borderRadius:8,background:C.orangeDim,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>💸</div>
                             <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:12,fontWeight:700,color:C.text}}>{mxn(r.amount)}</div>
+                              <div style={{fontSize:12,fontWeight:700,color:C.text}}>{r.concept||"—"}</div>
                               <div style={{fontSize:10,color:C.sub,marginTop:1}}>
-                                → {acc?.name||"Cuenta"}
+                                {mxn(r.amount)} → {acc?.name||"Cuenta"}
                                 <span style={{color:C.muted,marginLeft:6}}>{fmtDate(r.date)}</span>
                               </div>
                             </div>
@@ -1724,6 +1730,9 @@ function Goals({goals, setGoals, accounts, setAccounts, goalWithdrawals, session
             </div>
             <Field label="Monto a retirar (MXN)">
               <Input value={withdrawAmt} onChange={setWithdrawAmt} placeholder="0.00" type="number"/>
+            </Field>
+            <Field label="Concepto" hint="¿Para qué es este retiro?">
+              <Input value={withdrawConcept} onChange={setWithdrawConcept} placeholder="Ej. Pago de renta, Compra laptop..."/>
             </Field>
             <Field label="Enviar a cuenta de débito">
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -2296,7 +2305,7 @@ export default function App() {
     setPlans((msiR.data||[]).map(p=>({ id:p.id, desc:p.description, total:Number(p.total_amount), monthly:Number(p.monthly_payment), totalM:p.total_months, paidM:p.paid_months, accountId:p.account_id, startDate:p.start_date })));
     setSubs((subR.data||[]).map(s=>({ id:s.id, name:s.name, amount:Number(s.amount), frequency:s.frequency, categoryId:s.category_id, accountId:s.account_id, chargeDay:s.charge_day, active:s.active, color:"#7C6FFF" })));
     setTransfers((trR.data||[]).map(t=>({ id:t.id, type:t.type, amount:Number(t.amount), accountId:t.account_id, counterparty:t.counterparty, date:t.date, notes:t.notes })));
-    setGoalWithdrawals((gwR.data||[]).map(w=>({ id:w.id, goalId:w.goal_id, accountId:w.account_id, amount:Number(w.amount), date:w.date })));
+    setGoalWithdrawals((gwR.data||[]).map(w=>({ id:w.id, goalId:w.goal_id, accountId:w.account_id, amount:Number(w.amount), date:w.date, concept:w.concept||null })));
     setDataLoading(false);
   }, [session]);
 
