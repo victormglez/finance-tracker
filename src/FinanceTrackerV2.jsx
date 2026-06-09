@@ -544,7 +544,7 @@ function SectionBody({isOpen, color=C.accent, children}) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({expenses, accounts, setAccounts, categories, setCategories, transfers, setTransfers, onAddAccount, onUpdateAccount, onDeleteAccount, session, reloadAll}) {
+function Dashboard({expenses, accounts, setAccounts, categories, setCategories, transfers, setTransfers, goalWithdrawals, goals, onAddAccount, onUpdateAccount, onDeleteAccount, session, reloadAll}) {
   const currentMonth = getCurrentMonth();
   const monthExp = expenses.filter(e=>e.date.startsWith(currentMonth)&&!e.isMSIInstallment);
   const monthTotal = monthExp.reduce((s,e)=>s+e.amount,0);
@@ -625,22 +625,52 @@ function Dashboard({expenses, accounts, setAccounts, categories, setCategories, 
       </SectionBody>
 
       {/* TRANSFERENCIAS RECIBIDAS */}
-      <SectionHead label="📥 Transferencias Recibidas" isOpen={openSections.transfers} onToggle={()=>toggle("transfers")} count={transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).length} color={C.green} onAdd={()=>{setTransForm(emptyTransForm);setShowAddTrans(true);}} addLabel="Registrar"/>
-      <SectionBody isOpen={openSections.transfers} color={C.green}>
-        {transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).length===0
-          ? <div style={{textAlign:"center",padding:"10px 0",color:C.muted,fontSize:12}}>Sin transferencias registradas</div>
-          : transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).slice(0,8).map(t=>{
-              const acc=accounts.find(a=>a.id===t.accountId);
-              return (
-                <div key={t.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
-                  <span style={{fontSize:18}}>📥</span>
-                  <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:C.text}}>De: <span style={{color:C.green}}>{t.counterparty}</span></div><div style={{display:"flex",gap:5,marginTop:2}}>{acc&&<Tag color={acc.color}>{acc.name}</Tag>}<span style={{fontSize:10,color:C.muted}}>{fmtDateShort(t.date)}</span></div></div>
-                  <span style={{fontSize:13,fontWeight:900,color:C.green}}>+{mxn(t.amount)}</span>
-                </div>
-              );
-            })
-        }
-      </SectionBody>
+      {(()=>{
+        const visTransfers = transfers.filter(t=>!t.counterparty?.startsWith("__goal__"));
+        const totalCount = visTransfers.length + (goalWithdrawals||[]).length;
+        const gwSorted = [...(goalWithdrawals||[])].sort((a,b)=>b.date.localeCompare(a.date));
+        return (
+          <>
+            <SectionHead label="📥 Transferencias Recibidas" isOpen={openSections.transfers} onToggle={()=>toggle("transfers")} count={totalCount} color={C.green} onAdd={()=>{setTransForm(emptyTransForm);setShowAddTrans(true);}} addLabel="Registrar"/>
+            <SectionBody isOpen={openSections.transfers} color={C.green}>
+              {totalCount===0
+                ? <div style={{textAlign:"center",padding:"10px 0",color:C.muted,fontSize:12}}>Sin transferencias registradas</div>
+                : <>
+                    {gwSorted.map(w=>{
+                      const acc=accounts.find(a=>a.id===w.accountId);
+                      const goal=goals.find(g=>g.id===w.goalId);
+                      return (
+                        <div key={w.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+                          <span style={{fontSize:18}}>💸</span>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:13,fontWeight:700,color:C.text}}>
+                              {goal?.name||"Meta"}{w.concept&&<span style={{color:C.sub,fontWeight:400}}> · {w.concept}</span>}
+                            </div>
+                            <div style={{display:"flex",gap:5,marginTop:2}}>
+                              {acc&&<Tag color={acc.color}>{acc.name}</Tag>}
+                              <span style={{fontSize:10,color:C.muted}}>{fmtDateShort(w.date)}</span>
+                            </div>
+                          </div>
+                          <span style={{fontSize:13,fontWeight:900,color:C.green}}>+{mxn(w.amount)}</span>
+                        </div>
+                      );
+                    })}
+                    {visTransfers.slice(0,8).map(t=>{
+                      const acc=accounts.find(a=>a.id===t.accountId);
+                      return (
+                        <div key={t.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+                          <span style={{fontSize:18}}>📥</span>
+                          <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:C.text}}>De: <span style={{color:C.green}}>{t.counterparty}</span></div><div style={{display:"flex",gap:5,marginTop:2}}>{acc&&<Tag color={acc.color}>{acc.name}</Tag>}<span style={{fontSize:10,color:C.muted}}>{fmtDateShort(t.date)}</span></div></div>
+                          <span style={{fontSize:13,fontWeight:900,color:C.green}}>+{mxn(t.amount)}</span>
+                        </div>
+                      );
+                    })}
+                  </>
+              }
+            </SectionBody>
+          </>
+        );
+      })()}
 
       {/* CATEGORÍAS */}
       <SectionHead label="🏷️ Categorías" isOpen={openSections.cats} onToggle={()=>toggle("cats")} count={categories.length} color="#FF9800" onAdd={()=>{setCatForm(emptyCatForm);setEditingCat(null);setShowAddCat(true);}} addLabel="Nueva"/>
@@ -1588,6 +1618,15 @@ function Goals({goals, setGoals, accounts, setAccounts, goalWithdrawals, session
     if (reloadAll) await reloadAll();
   };
 
+  const deleteWithdrawal = async (w, goal) => {
+    if (!window.confirm("¿Eliminar este retiro? El monto regresará a la cuenta.")) return;
+    await sb.from("goal_withdrawals").delete().eq("id", w.id);
+    const acc = accounts.find(a => a.id === w.accountId);
+    if (acc) await sb.from("accounts").update({ balance: acc.balance - w.amount }).eq("id", acc.id);
+    await sb.from("goals").update({ current_amount: goal.current + w.amount }).eq("id", goal.id);
+    if (reloadAll) await reloadAll();
+  };
+
   const openWithdraw = (goal) => { setWithdrawGoal(goal); setWithdrawAmt(""); setWithdrawConcept(""); setShowWithdraw(true); };
 
   const doWithdraw = async (targetAccountId) => {
@@ -1683,7 +1722,7 @@ function Goals({goals, setGoals, accounts, setAccounts, goalWithdrawals, session
                                 <span style={{color:C.muted,marginLeft:6}}>{fmtDate(r.date)}</span>
                               </div>
                             </div>
-                            <div style={{width:8,height:8,borderRadius:4,background:acc?.color||C.orange,flexShrink:0}}/>
+                            <button onClick={()=>deleteWithdrawal(r, goal)} style={{background:"none",border:"none",color:C.red,fontSize:16,cursor:"pointer",padding:"2px 4px",flexShrink:0}}>🗑</button>
                           </div>
                         );
                       })}
@@ -2341,7 +2380,7 @@ export default function App() {
 
   const screen = (
     <>
-      {tab==="dashboard" && <Dashboard expenses={expenses} accounts={accounts} setAccounts={setAccounts} categories={categories} setCategories={setCategories} transfers={transfers} setTransfers={setTransfers} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount} session={session} reloadAll={loadAll}/>}
+      {tab==="dashboard" && <Dashboard expenses={expenses} accounts={accounts} setAccounts={setAccounts} categories={categories} setCategories={setCategories} transfers={transfers} setTransfers={setTransfers} goalWithdrawals={goalWithdrawals} goals={goals} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount} session={session} reloadAll={loadAll}/>}
       {tab==="expenses"  && <Expenses  expenses={expenses} setExpenses={setExpenses} accounts={accounts} setAccounts={setAccounts} subs={subs} plans={plans} setPlans={setPlans} categories={categories} goals={goals} setGoals={setGoals} session={session} reloadAll={loadAll}/>}
       {tab==="msi"       && <MSI       plans={plans} setPlans={setPlans} accounts={accounts} session={session} reloadAll={loadAll}/>}
       {tab==="goals"     && <Goals     goals={goals} setGoals={setGoals} accounts={accounts} setAccounts={setAccounts} goalWithdrawals={goalWithdrawals} session={session} reloadAll={loadAll}/>}
