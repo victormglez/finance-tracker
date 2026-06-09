@@ -753,6 +753,7 @@ function ExpenseRow({exp, accounts, categories, onClick}) {
 function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, setPlans, categories, goals, setGoals, session, reloadAll}) {
   const [showModal, setShowModal] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
+  const [editDate, setEditDate] = useState(null);
   const [nextId, setNextId] = useState(200);
   const [nextPlanId, setNextPlanId] = useState(100);
   const [showPayTDC, setShowPayTDC] = useState(false);
@@ -1193,8 +1194,10 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
         const cat=categories.find(c=>c.id===exp.categoryId);
         const pd=exp.paymentDate;
         const d=pd?daysUntil(pd):null;
+        const curDate = editDate ?? exp.date;
+        const dateChanged = curDate !== exp.date;
         return (
-          <Modal open={true} onClose={()=>setShowDetail(null)} title="Detalle del Gasto">
+          <Modal open={true} onClose={()=>{setShowDetail(null);setEditDate(null);}} title="Detalle del Gasto">
             <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}>
               <div style={{width:52,height:52,borderRadius:14,background:(cat?.color||C.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26}}>{cat?.icon||"🏷️"}</div>
               <div>
@@ -1226,12 +1229,26 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
                 </div>
               </div>
             )}
+            <Field label="Fecha del gasto" hint="Modifica si registraste en la fecha incorrecta">
+              <input type="date" value={curDate} onChange={e=>setEditDate(e.target.value)}
+                style={{width:"100%",background:C.elevated,border:`1px solid ${dateChanged?C.accent:C.border}`,borderRadius:10,padding:"10px 12px",color:C.text,fontSize:14,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+            </Field>
+            {dateChanged&&(
+              <button onClick={async()=>{
+                await sb.from("expenses").update({date: curDate}).eq("id", exp.id);
+                setEditDate(null);
+                if(reloadAll) await reloadAll();
+              }} style={{width:"100%",background:C.accent,border:"none",borderRadius:12,padding:"11px 0",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:8}}>
+                Guardar fecha
+              </button>
+            )}
             <button onClick={async()=>{
               if(!window.confirm("¿Eliminar este gasto?")) return;
               await sb.from("expenses").delete().eq("id", exp.id);
               const acc = accounts.find(a=>a.id===exp.accountId);
               if(acc) await sb.from("accounts").update({balance: acc.balance + exp.amount}).eq("id", acc.id);
               setShowDetail(null);
+              setEditDate(null);
               if(reloadAll) await reloadAll();
             }} style={{width:"100%",background:C.redDim,border:`1px solid ${C.red}44`,borderRadius:12,padding:"11px 0",color:C.red,fontSize:13,fontWeight:700,cursor:"pointer"}}>
               🗑 Eliminar gasto
