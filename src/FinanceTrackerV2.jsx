@@ -627,14 +627,19 @@ function Dashboard({expenses, accounts, setAccounts, categories, setCategories, 
       {/* TRANSFERENCIAS RECIBIDAS */}
       <SectionHead label="📥 Transferencias Recibidas" isOpen={openSections.transfers} onToggle={()=>toggle("transfers")} count={transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).length} color={C.green} onAdd={()=>{setTransForm(emptyTransForm);setShowAddTrans(true);}} addLabel="Registrar"/>
       <SectionBody isOpen={openSections.transfers} color={C.green}>
-        {transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).slice(0,8).map(t=>{const acc=accounts.find(a=>a.id===t.accountId);return(
-          <div key={t.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
-            <span style={{fontSize:18}}>📥</span>
-            <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:C.text}}>De: <span style={{color:C.green}}>{t.counterparty}</span></div><div style={{display:"flex",gap:5,marginTop:2}}>{acc&&<Tag color={acc.color}>{acc.name}</Tag>}<span style={{fontSize:10,color:C.muted}}>{fmtDateShort(t.date)}</span></div></div>
-            <span style={{fontSize:13,fontWeight:900,color:C.green}}>+{mxn(t.amount)}</span>
-          </div>
-        );})}
-        {transfers.length===0&&<div style={{textAlign:"center",padding:"10px 0",color:C.muted,fontSize:12}}>Sin transferencias registradas</div>}
+        {transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).length===0
+          ? <div style={{textAlign:"center",padding:"10px 0",color:C.muted,fontSize:12}}>Sin transferencias registradas</div>
+          : transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).slice(0,8).map(t=>{
+              const acc=accounts.find(a=>a.id===t.accountId);
+              return (
+                <div key={t.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:18}}>📥</span>
+                  <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:C.text}}>De: <span style={{color:C.green}}>{t.counterparty}</span></div><div style={{display:"flex",gap:5,marginTop:2}}>{acc&&<Tag color={acc.color}>{acc.name}</Tag>}<span style={{fontSize:10,color:C.muted}}>{fmtDateShort(t.date)}</span></div></div>
+                  <span style={{fontSize:13,fontWeight:900,color:C.green}}>+{mxn(t.amount)}</span>
+                </div>
+              );
+            })
+        }
       </SectionBody>
 
       {/* CATEGORÍAS */}
@@ -2305,6 +2310,7 @@ export default function App() {
     setPlans((msiR.data||[]).map(p=>({ id:p.id, desc:p.description, total:Number(p.total_amount), monthly:Number(p.monthly_payment), totalM:p.total_months, paidM:p.paid_months, accountId:p.account_id, startDate:p.start_date })));
     setSubs((subR.data||[]).map(s=>({ id:s.id, name:s.name, amount:Number(s.amount), frequency:s.frequency, categoryId:s.category_id, accountId:s.account_id, chargeDay:s.charge_day, active:s.active, color:"#7C6FFF" })));
     setTransfers((trR.data||[]).map(t=>({ id:t.id, type:t.type, amount:Number(t.amount), accountId:t.account_id, counterparty:t.counterparty, date:t.date, notes:t.notes })));
+    if (gwR.error) console.error("goal_withdrawals fetch error:", gwR.error);
     setGoalWithdrawals((gwR.data||[]).map(w=>({ id:w.id, goalId:w.goal_id, accountId:w.account_id, amount:Number(w.amount), date:w.date, concept:w.concept||null })));
     setDataLoading(false);
   }, [session]);
