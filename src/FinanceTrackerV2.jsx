@@ -620,9 +620,9 @@ function Dashboard({expenses, accounts, setAccounts, categories, setCategories, 
       </SectionBody>
 
       {/* TRANSFERENCIAS RECIBIDAS */}
-      <SectionHead label="📥 Transferencias Recibidas" k="transfers" count={transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).length} color={C.green} onAdd={()=>{setTransForm(emptyTransForm);setShowAddTrans(true);}} addLabel="Registrar"/>
+      <SectionHead label="📥 Transferencias Recibidas" k="transfers" count={transfers.length} color={C.green} onAdd={()=>{setTransForm(emptyTransForm);setShowAddTrans(true);}} addLabel="Registrar"/>
       <SectionBody k="transfers" color={C.green}>
-        {transfers.filter(t=>!t.counterparty?.startsWith("__goal__")).slice(0,8).map(t=>{const acc=accounts.find(a=>a.id===t.accountId);return(
+        {transfers.slice(0,8).map(t=>{const acc=accounts.find(a=>a.id===t.accountId);return(
           <div key={t.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
             <span style={{fontSize:18}}>📥</span>
             <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:C.text}}>De: <span style={{color:C.green}}>{t.counterparty}</span></div><div style={{display:"flex",gap:5,marginTop:2}}>{acc&&<Tag color={acc.color}>{acc.name}</Tag>}<span style={{fontSize:10,color:C.muted}}>{fmtDateShort(t.date)}</span></div></div>
@@ -1533,7 +1533,7 @@ function Subscriptions({subs, setSubs, accounts, expenses, setExpenses, categori
 }
 
 // ─── GOALS ────────────────────────────────────────────────────────────────────
-function Goals({goals, setGoals, accounts, setAccounts, transfers, session, reloadAll}) {
+function Goals({goals, setGoals, accounts, setAccounts, goalWithdrawals, session, reloadAll}) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -1544,18 +1544,14 @@ function Goals({goals, setGoals, accounts, setAccounts, transfers, session, relo
   const [nextId, setNextId] = useState(20);
   const [openHistory, setOpenHistory] = useState({});
 
-  const goalWithdrawals = useMemo(() => {
+  const withdrawalsByGoal = useMemo(() => {
     const map = {};
-    (transfers||[]).forEach(t => {
-      if (!t.counterparty?.startsWith("__goal__")) return;
-      const parts = t.counterparty.split("__").filter(Boolean);
-      const gid = parts[1];
-      if (!gid) return;
-      if (!map[gid]) map[gid] = [];
-      map[gid].push(t);
+    (goalWithdrawals||[]).forEach(w => {
+      if (!map[w.goalId]) map[w.goalId] = [];
+      map[w.goalId].push(w);
     });
     return map;
-  }, [transfers]);
+  }, [goalWithdrawals]);
 
   const ICONS=["🎯","🚀","💍","💒","🛡️","🏠","🚗","✈️","🏆","📚","💪","🎸"];
   const COLS=[C.green,C.gold,"#FF6B9D",C.red,C.blue,C.orange,C.accent,"#00B4D8"];
@@ -1589,7 +1585,7 @@ function Goals({goals, setGoals, accounts, setAccounts, transfers, session, relo
     await sb.from("goals").update({ current_amount: Math.max(0, withdrawGoal.current - amt) }).eq("id", withdrawGoal.id);
     const acc = accounts.find(a=>a.id===targetAccountId);
     if (acc) await sb.from("accounts").update({ balance: acc.balance + amt }).eq("id", targetAccountId);
-    await sb.from("transfers").insert({ user_id: session?.user?.id, type: "sent", amount: amt, account_id: targetAccountId, counterparty: `__goal__${withdrawGoal.id}__${withdrawGoal.name}`, date: today(), notes: `Retiro de meta: ${withdrawGoal.name}` });
+    await sb.from("goal_withdrawals").insert({ user_id: session?.user?.id, goal_id: withdrawGoal.id, account_id: targetAccountId, amount: amt, date: today() });
     setShowWithdraw(false); setWithdrawGoal(null); setWithdrawAmt("");
     if (reloadAll) await reloadAll();
   };
@@ -1651,20 +1647,20 @@ function Goals({goals, setGoals, accounts, setAccounts, transfers, session, relo
                 </div>
               </div>
               {/* Withdrawal history toggle */}
-              {(goalWithdrawals[goal.id]||[]).length>0&&(
+              {(withdrawalsByGoal[goal.id]||[]).length>0&&(
                 <div style={{marginTop:10,borderTop:`1px solid ${C.border}`,paddingTop:8}}>
                   <button onClick={()=>setOpenHistory(h=>({...h,[goal.id]:!h[goal.id]}))} style={{
                     background:"none",border:"none",padding:0,cursor:"pointer",width:"100%",
                     display:"flex",justifyContent:"space-between",alignItems:"center",
                   }}>
                     <span style={{fontSize:10,fontWeight:800,color:C.muted,textTransform:"uppercase",letterSpacing:.8}}>
-                      📋 Historial de retiros ({(goalWithdrawals[goal.id]||[]).length})
+                      📋 Historial de retiros ({(withdrawalsByGoal[goal.id]||[]).length})
                     </span>
                     <span style={{fontSize:12,color:C.muted,transition:"transform .2s",display:"inline-block",transform:openHistory[goal.id]?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
                   </button>
                   {openHistory[goal.id]&&(
                     <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:6}}>
-                      {(goalWithdrawals[goal.id]||[]).map((r,i)=>{
+                      {(withdrawalsByGoal[goal.id]||[]).map((r,i)=>{
                         const acc = accounts.find(a=>a.id===r.accountId);
                         return (
                           <div key={r.id||i} style={{display:"flex",alignItems:"center",gap:10,background:C.elevated,borderRadius:10,padding:"8px 10px",border:`1px solid ${C.border}`}}>
@@ -1672,7 +1668,7 @@ function Goals({goals, setGoals, accounts, setAccounts, transfers, session, relo
                             <div style={{flex:1,minWidth:0}}>
                               <div style={{fontSize:12,fontWeight:700,color:C.text}}>{mxn(r.amount)}</div>
                               <div style={{fontSize:10,color:C.sub,marginTop:1}}>
-                                → {acc?.name||r.counterparty||"Cuenta"}
+                                → {acc?.name||"Cuenta"}
                                 <span style={{color:C.muted,marginLeft:6}}>{fmtDate(r.date)}</span>
                               </div>
                             </div>
@@ -2271,6 +2267,7 @@ export default function App() {
   const [plans,      setPlans]      = useState([]);
   const [subs,       setSubs]       = useState([]);
   const [transfers,  setTransfers]  = useState([]);
+  const [goalWithdrawals, setGoalWithdrawals] = useState([]);
   const [dataLoading, setDataLoading] = useState(false);
 
   useEffect(() => {
@@ -2282,7 +2279,7 @@ export default function App() {
   const loadAll = useCallback(async () => {
     if (!session) return;
     setDataLoading(true);
-    const [accR, catR, expR, gR, msiR, subR, trR] = await Promise.all([
+    const [accR, catR, expR, gR, msiR, subR, trR, gwR] = await Promise.all([
       sb.from("accounts").select("*").order("name"),
       sb.from("categories").select("*").order("name"),
       sb.from("expenses").select("*").order("date", { ascending: false }),
@@ -2290,6 +2287,7 @@ export default function App() {
       sb.from("msi_plans").select("*").order("created_at", { ascending: false }),
       sb.from("subscriptions").select("*").eq("active", true).order("name"),
       sb.from("transfers").select("*").order("date", { ascending: false }),
+      sb.from("goal_withdrawals").select("*").order("date", { ascending: false }),
     ]);
     setAccounts((accR.data||[]).map(a=>({ id:a.id, name:a.name, type:a.type, balance:Number(a.balance), limit:a.credit_limit?Number(a.credit_limit):null, color:a.color, cutDay:a.cut_day, payDay:a.pay_day })));
     setCategories((catR.data||[]).map(c=>({ id:c.id, name:c.name, icon:c.icon, color:c.color, budget:Number(c.budget) })));
@@ -2298,6 +2296,7 @@ export default function App() {
     setPlans((msiR.data||[]).map(p=>({ id:p.id, desc:p.description, total:Number(p.total_amount), monthly:Number(p.monthly_payment), totalM:p.total_months, paidM:p.paid_months, accountId:p.account_id, startDate:p.start_date })));
     setSubs((subR.data||[]).map(s=>({ id:s.id, name:s.name, amount:Number(s.amount), frequency:s.frequency, categoryId:s.category_id, accountId:s.account_id, chargeDay:s.charge_day, active:s.active, color:"#7C6FFF" })));
     setTransfers((trR.data||[]).map(t=>({ id:t.id, type:t.type, amount:Number(t.amount), accountId:t.account_id, counterparty:t.counterparty, date:t.date, notes:t.notes })));
+    setGoalWithdrawals((gwR.data||[]).map(w=>({ id:w.id, goalId:w.goal_id, accountId:w.account_id, amount:Number(w.amount), date:w.date })));
     setDataLoading(false);
   }, [session]);
 
@@ -2330,7 +2329,7 @@ export default function App() {
       {tab==="dashboard" && <Dashboard expenses={expenses} accounts={accounts} setAccounts={setAccounts} categories={categories} setCategories={setCategories} transfers={transfers} setTransfers={setTransfers} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount} session={session} reloadAll={loadAll}/>}
       {tab==="expenses"  && <Expenses  expenses={expenses} setExpenses={setExpenses} accounts={accounts} setAccounts={setAccounts} subs={subs} plans={plans} setPlans={setPlans} categories={categories} goals={goals} setGoals={setGoals} session={session} reloadAll={loadAll}/>}
       {tab==="msi"       && <MSI       plans={plans} setPlans={setPlans} accounts={accounts} session={session} reloadAll={loadAll}/>}
-      {tab==="goals"     && <Goals     goals={goals} setGoals={setGoals} accounts={accounts} setAccounts={setAccounts} transfers={transfers} session={session} reloadAll={loadAll}/>}
+      {tab==="goals"     && <Goals     goals={goals} setGoals={setGoals} accounts={accounts} setAccounts={setAccounts} goalWithdrawals={goalWithdrawals} session={session} reloadAll={loadAll}/>}
       {tab==="subs"      && <Subscriptions subs={subs} setSubs={setSubs} accounts={accounts} expenses={expenses} setExpenses={setExpenses} categories={categories} session={session} reloadAll={loadAll}/>}
     </>
   );
