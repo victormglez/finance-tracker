@@ -1533,15 +1533,26 @@ function Subscriptions({subs, setSubs, accounts, expenses, setExpenses, categori
 }
 
 // ─── GOALS ────────────────────────────────────────────────────────────────────
-function Goals({goals, setGoals, accounts, setAccounts, session, reloadAll}) {
+function Goals({goals, setGoals, accounts, setAccounts, transfers, session, reloadAll}) {
   const [showAdd, setShowAdd] = useState(false);
-  const [editing, setEditing] = useState(null);      // goal being edited/viewed
+  const [editing, setEditing] = useState(null);
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [withdrawGoal, setWithdrawGoal] = useState(null);
   const [withdrawAmt, setWithdrawAmt] = useState("");
   const [editForm, setEditForm] = useState({name:"",target:"",current:"",icon:"🎯",color:"#00D08A"});
   const [addForm, setAddForm] = useState({name:"",target:"",current:"0",icon:"🎯",color:"#00D08A"});
   const [nextId, setNextId] = useState(20);
+  const [openHistory, setOpenHistory] = useState({});
+
+  const goalWithdrawals = useMemo(() => {
+    const map = {};
+    (transfers||[]).filter(t=>t.type==="goal_withdrawal").forEach(t => {
+      const gid = t.notes;
+      if (!map[gid]) map[gid] = [];
+      map[gid].push(t);
+    });
+    return map;
+  }, [transfers]);
 
   const ICONS=["🎯","🚀","💍","💒","🛡️","🏠","🚗","✈️","🏆","📚","💪","🎸"];
   const COLS=[C.green,C.gold,"#FF6B9D",C.red,C.blue,C.orange,C.accent,"#00B4D8"];
@@ -1575,6 +1586,7 @@ function Goals({goals, setGoals, accounts, setAccounts, session, reloadAll}) {
     await sb.from("goals").update({ current_amount: Math.max(0, withdrawGoal.current - amt) }).eq("id", withdrawGoal.id);
     const acc = accounts.find(a=>a.id===targetAccountId);
     if (acc) await sb.from("accounts").update({ balance: acc.balance + amt }).eq("id", targetAccountId);
+    await sb.from("transfers").insert({ user_id: session?.user?.id, type: "goal_withdrawal", amount: amt, account_id: targetAccountId, counterparty: withdrawGoal.name, date: today(), notes: String(withdrawGoal.id) });
     setShowWithdraw(false); setWithdrawGoal(null); setWithdrawAmt("");
     if (reloadAll) await reloadAll();
   };
@@ -1635,6 +1647,40 @@ function Goals({goals, setGoals, accounts, setAccounts, session, reloadAll}) {
                   <button onClick={()=>openEdit(goal)} style={{background:C.elevated,border:`1px solid ${C.border}`,borderRadius:8,padding:"5px 9px",color:C.sub,fontSize:12,cursor:"pointer"}}>✏️</button>
                 </div>
               </div>
+              {/* Withdrawal history toggle */}
+              {(goalWithdrawals[goal.id]||[]).length>0&&(
+                <div style={{marginTop:10,borderTop:`1px solid ${C.border}`,paddingTop:8}}>
+                  <button onClick={()=>setOpenHistory(h=>({...h,[goal.id]:!h[goal.id]}))} style={{
+                    background:"none",border:"none",padding:0,cursor:"pointer",width:"100%",
+                    display:"flex",justifyContent:"space-between",alignItems:"center",
+                  }}>
+                    <span style={{fontSize:10,fontWeight:800,color:C.muted,textTransform:"uppercase",letterSpacing:.8}}>
+                      📋 Historial de retiros ({(goalWithdrawals[goal.id]||[]).length})
+                    </span>
+                    <span style={{fontSize:12,color:C.muted,transition:"transform .2s",display:"inline-block",transform:openHistory[goal.id]?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+                  </button>
+                  {openHistory[goal.id]&&(
+                    <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:6}}>
+                      {(goalWithdrawals[goal.id]||[]).map((r,i)=>{
+                        const acc = accounts.find(a=>a.id===r.accountId);
+                        return (
+                          <div key={r.id||i} style={{display:"flex",alignItems:"center",gap:10,background:C.elevated,borderRadius:10,padding:"8px 10px",border:`1px solid ${C.border}`}}>
+                            <div style={{width:30,height:30,borderRadius:8,background:C.orangeDim,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>💸</div>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:12,fontWeight:700,color:C.text}}>{mxn(r.amount)}</div>
+                              <div style={{fontSize:10,color:C.sub,marginTop:1}}>
+                                → {acc?.name||r.counterparty||"Cuenta"}
+                                <span style={{color:C.muted,marginLeft:6}}>{fmtDate(r.date)}</span>
+                              </div>
+                            </div>
+                            <div style={{width:8,height:8,borderRadius:4,background:acc?.color||C.orange,flexShrink:0}}/>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -2281,7 +2327,7 @@ export default function App() {
       {tab==="dashboard" && <Dashboard expenses={expenses} accounts={accounts} setAccounts={setAccounts} categories={categories} setCategories={setCategories} transfers={transfers} setTransfers={setTransfers} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount} session={session} reloadAll={loadAll}/>}
       {tab==="expenses"  && <Expenses  expenses={expenses} setExpenses={setExpenses} accounts={accounts} setAccounts={setAccounts} subs={subs} plans={plans} setPlans={setPlans} categories={categories} goals={goals} setGoals={setGoals} session={session} reloadAll={loadAll}/>}
       {tab==="msi"       && <MSI       plans={plans} setPlans={setPlans} accounts={accounts} session={session} reloadAll={loadAll}/>}
-      {tab==="goals"     && <Goals     goals={goals} setGoals={setGoals} accounts={accounts} setAccounts={setAccounts} session={session} reloadAll={loadAll}/>}
+      {tab==="goals"     && <Goals     goals={goals} setGoals={setGoals} accounts={accounts} setAccounts={setAccounts} transfers={transfers} session={session} reloadAll={loadAll}/>}
       {tab==="subs"      && <Subscriptions subs={subs} setSubs={setSubs} accounts={accounts} expenses={expenses} setExpenses={setExpenses} categories={categories} session={session} reloadAll={loadAll}/>}
     </>
   );
