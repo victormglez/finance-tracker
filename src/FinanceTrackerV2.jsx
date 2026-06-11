@@ -293,7 +293,7 @@ function AccountCard({acc, onClick}) {
         <span style={{fontSize:12,fontWeight:800,color:C.text}}>{acc.name}</span>
         <span style={{marginLeft:"auto",fontSize:9,background:acc.type==="debit"?C.greenDim:C.accentDim,color:acc.type==="debit"?C.green:C.accent,padding:"1px 5px",borderRadius:4,fontWeight:700}}>{acc.type==="debit"?"Débito":"Crédito"}</span>
       </div>
-      <div style={{fontSize:17,fontWeight:900,color:acc.balance>=0?C.text:C.red,marginBottom:pct!==null?8:0}}>{mxn(acc.balance)}</div>
+      <div style={{fontSize:17,fontWeight:900,color:acc.balance>=0?C.text:C.red,marginBottom:pct!==null?8:0}}>{acc.type==="credit"?mxn(Math.abs(acc.balance)):mxn(acc.balance)}</div>
       {pct!==null&&<>
         <ProgressBar pct={pct} color={utilColor(pct)} h={4}/>
         <div style={{fontSize:10,fontWeight:700,color:utilColor(pct),marginTop:3}}>{pct.toFixed(1)}% utilizado</div>
