@@ -912,8 +912,8 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
         }));
         await sb.from("expenses").insert(rows);
       }
-      // 3. Deduct full purchase from card balance
-      if (acc) await sb.from("accounts").update({ balance: acc.balance - amt }).eq("id", acc.id);
+      // 3. Update card balance (credit: adds to debt, debit: deducts from balance)
+      if (acc) await sb.from("accounts").update({ balance: acc.type==="credit" ? acc.balance + amt : acc.balance - amt }).eq("id", acc.id);
 
     } else {
       const pd = acc?.type==="credit"&&acc.cutDay&&acc.payDay ? calcPaymentDate(form.date,acc.cutDay,acc.payDay) : null;
@@ -929,8 +929,8 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
         linked_goal_id: (isSavingsCat && form.linkedGoalId) ? form.linkedGoalId : null,
       });
 
-      // Update account balance
-      if (acc) await sb.from("accounts").update({ balance: acc.balance - amt }).eq("id", acc.id);
+      // Update account balance (credit: adds to debt, debit: deducts from balance)
+      if (acc) await sb.from("accounts").update({ balance: acc.type==="credit" ? acc.balance + amt : acc.balance - amt }).eq("id", acc.id);
 
       // If savings → update goal
       if (isSavingsCat && form.linkedGoalId) {
@@ -1318,7 +1318,7 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
               if(!window.confirm("¿Eliminar este gasto?")) return;
               await sb.from("expenses").delete().eq("id", exp.id);
               const acc = accounts.find(a=>a.id===exp.accountId);
-              if(acc) await sb.from("accounts").update({balance: acc.balance + exp.amount}).eq("id", acc.id);
+              if(acc) await sb.from("accounts").update({balance: acc.type==="credit" ? acc.balance - exp.amount : acc.balance + exp.amount}).eq("id", acc.id);
               setShowDetail(null);
               setEditDate(null);
               if(reloadAll) await reloadAll();
@@ -1363,7 +1363,7 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
           const tdc = accounts.find(a=>a.id===payTDCForm.accountId);
           const nomina = accounts.find(a=>a.type==="debit");
           const amt = parseFloat(payTDCForm.amount);
-          const newTDC = tdc ? Math.min(0, tdc.balance + amt) : 0;
+          const newTDC = tdc ? Math.max(0, tdc.balance - amt) : 0;
           const newNomina = nomina ? nomina.balance - amt : 0;
           const insufficient = nomina && amt > nomina.balance;
           return (
@@ -1404,7 +1404,7 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
           if(nominaAcc && nominaAcc.balance < amt) { alert(`Saldo insuficiente en ${nominaAcc.name}.\nDisponible: ${mxn(nominaAcc.balance)}\nNecesitas: ${mxn(amt)}`); return; }
           const tdcAcc = accounts.find(a=>a.id===payTDCForm.accountId);
           // Update TDC balance
-          await sb.from("accounts").update({ balance: Math.min(0, tdcAcc.balance + amt) }).eq("id", tdcAcc.id);
+          await sb.from("accounts").update({ balance: Math.max(0, tdcAcc.balance - amt) }).eq("id", tdcAcc.id);
           // Update Nómina balance
           if(nominaAcc) await sb.from("accounts").update({ balance: nominaAcc.balance - amt }).eq("id", nominaAcc.id);
           // Register expense
