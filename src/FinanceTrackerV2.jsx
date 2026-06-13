@@ -794,6 +794,7 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
   const [showModal, setShowModal] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
   const [editDate, setEditDate] = useState(null);
+  const [expenseEdit, setExpenseEdit] = useState(null);
   const [paidPayments, setPaidPayments] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem("paidTdcPayments")||"[]")); }
     catch { return new Set(); }
@@ -1266,65 +1267,110 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
         const cat=categories.find(c=>c.id===exp.categoryId);
         const pd=exp.paymentDate;
         const d=pd?daysUntil(pd):null;
-        const curDate = editDate ?? exp.date;
-        const dateChanged = curDate !== exp.date;
+
+        const saveEdit = async () => {
+          const newAmt = parseFloat(expenseEdit.amount);
+          if (isNaN(newAmt) || newAmt <= 0) return;
+          const oldAcc = accounts.find(a => a.id === exp.accountId);
+          const newAcc = accounts.find(a => a.id === expenseEdit.accountId);
+          await sb.from("expenses").update({
+            description: expenseEdit.description.trim(),
+            amount: newAmt,
+            date: expenseEdit.date,
+            category_id: expenseEdit.categoryId || null,
+            account_id: expenseEdit.accountId || null,
+          }).eq("id", exp.id);
+          if (oldAcc?.id === newAcc?.id) {
+            if (oldAcc) {
+              const oldImpact = oldAcc.type==="credit" ? exp.amount : -exp.amount;
+              const newImpact = oldAcc.type==="credit" ? newAmt : -newAmt;
+              await sb.from("accounts").update({ balance: oldAcc.balance - oldImpact + newImpact }).eq("id", oldAcc.id);
+            }
+          } else {
+            if (oldAcc) await sb.from("accounts").update({ balance: oldAcc.type==="credit" ? oldAcc.balance - exp.amount : oldAcc.balance + exp.amount }).eq("id", oldAcc.id);
+            if (newAcc) await sb.from("accounts").update({ balance: newAcc.type==="credit" ? newAcc.balance + newAmt : newAcc.balance - newAmt }).eq("id", newAcc.id);
+          }
+          setExpenseEdit(null); setShowDetail(null); setEditDate(null);
+          if (reloadAll) await reloadAll();
+        };
+
         return (
-          <Modal open={true} onClose={()=>{setShowDetail(null);setEditDate(null);}} title="Detalle del Gasto">
-            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}>
-              <div style={{width:52,height:52,borderRadius:14,background:(cat?.color||C.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26}}>{cat?.icon||"🏷️"}</div>
-              <div>
-                <div style={{fontSize:18,fontWeight:800,color:C.text}}>{exp.description}</div>
-                <div style={{fontSize:13,color:C.sub}}>{fmtDate(exp.date)}</div>
-              </div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-              {[
-                {label:"Monto",val:mxn(exp.amount),color:C.red},
-                {label:"Cuenta",val:acc?.name||"—",color:acc?.color||C.sub},
-                {label:"Categoría",val:cat?.name||"—",color:cat?.color||C.sub},
-                pd?{label:"Fecha de Pago",val:fmtDate(pd),color:d!==null&&d<=5?C.red:C.blue}:{label:"Tipo",val:"Débito",color:C.green},
-              ].map((s,i)=>(
-                <div key={i} style={{background:C.elevated,borderRadius:12,padding:"10px 12px",border:`1px solid ${C.border}`}}>
-                  <div style={{fontSize:10,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:.5}}>{s.label}</div>
-                  <div style={{fontSize:14,fontWeight:800,color:s.color}}>{s.val}</div>
+          <Modal open={true} onClose={()=>{setShowDetail(null);setEditDate(null);setExpenseEdit(null);}} title={expenseEdit?"Editar Gasto":"Detalle del Gasto"}>
+            {expenseEdit ? (
+              <>
+                <Field label="Descripción">
+                  <Input value={expenseEdit.description} onChange={v=>setExpenseEdit(f=>({...f,description:v}))} placeholder="Descripción..."/>
+                </Field>
+                <Field label="Monto (MXN)">
+                  <Input value={expenseEdit.amount} onChange={v=>setExpenseEdit(f=>({...f,amount:v}))} type="number" placeholder="0.00"/>
+                </Field>
+                <Field label="Fecha">
+                  <Input value={expenseEdit.date} onChange={v=>setExpenseEdit(f=>({...f,date:v}))} type="date"/>
+                </Field>
+                <Field label="Categoría">
+                  <ChipSelect options={categories} value={expenseEdit.categoryId} onChange={v=>setExpenseEdit(f=>({...f,categoryId:v}))} getColor={c=>c.color}/>
+                </Field>
+                {!exp.isMSI&&(
+                  <Field label="Cuenta">
+                    <ChipSelect options={accounts} value={expenseEdit.accountId} onChange={v=>setExpenseEdit(f=>({...f,accountId:v}))} getColor={a=>a.color}/>
+                  </Field>
+                )}
+                <div style={{display:"flex",gap:8,marginTop:8}}>
+                  <button onClick={()=>setExpenseEdit(null)} style={{flex:1,background:C.elevated,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px 0",color:C.sub,fontSize:13,fontWeight:700,cursor:"pointer"}}>Cancelar</button>
+                  <button onClick={saveEdit} style={{flex:2,background:C.accent,border:"none",borderRadius:12,padding:"11px 0",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Guardar Cambios</button>
                 </div>
-              ))}
-            </div>
-            {pd&&(
-              <div style={{background:d!==null&&d<=5?C.redDim:C.accentDim,borderRadius:12,padding:"12px 14px",marginBottom:12,border:`1px solid ${d!==null&&d<=5?C.red:C.accent}44`}}>
-                <div style={{fontSize:11,fontWeight:700,color:d!==null&&d<=5?C.red:C.accent,marginBottom:4}}>
-                  {d!==null&&d<=0?"⚠️ PAGO VENCIDO":d!==null&&d<=5?"🔴 PAGO PRÓXIMO":"📅 FECHA DE PAGO"}
+              </>
+            ) : (
+              <>
+                <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}>
+                  <div style={{width:52,height:52,borderRadius:14,background:(cat?.color||C.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26}}>{cat?.icon||"🏷️"}</div>
+                  <div>
+                    <div style={{fontSize:18,fontWeight:800,color:C.text}}>{exp.description}</div>
+                    <div style={{fontSize:13,color:C.sub}}>{fmtDate(exp.date)}</div>
+                  </div>
                 </div>
-                <div style={{fontSize:17,fontWeight:900,color:C.text}}>{fmtDate(pd)}</div>
-                <div style={{fontSize:12,color:C.sub,marginTop:3}}>
-                  {d!==null&&d<0?`Venció hace ${Math.abs(d)} días`:d===0?"Vence hoy":`Faltan ${d} días para pagar`}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+                  {[
+                    {label:"Monto",val:mxn(exp.amount),color:C.red},
+                    {label:"Cuenta",val:acc?.name||"—",color:acc?.color||C.sub},
+                    {label:"Categoría",val:cat?.name||"—",color:cat?.color||C.sub},
+                    pd?{label:"Fecha de Pago",val:fmtDate(pd),color:d!==null&&d<=5?C.red:C.blue}:{label:"Tipo",val:acc?.type==="credit"?"Crédito":"Débito",color:acc?.type==="credit"?C.accent:C.green},
+                  ].map((s,i)=>(
+                    <div key={i} style={{background:C.elevated,borderRadius:12,padding:"10px 12px",border:`1px solid ${C.border}`}}>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:.5}}>{s.label}</div>
+                      <div style={{fontSize:14,fontWeight:800,color:s.color}}>{s.val}</div>
+                    </div>
+                  ))}
                 </div>
-              </div>
+                {pd&&(
+                  <div style={{background:d!==null&&d<=5?C.redDim:C.accentDim,borderRadius:12,padding:"12px 14px",marginBottom:12,border:`1px solid ${d!==null&&d<=5?C.red:C.accent}44`}}>
+                    <div style={{fontSize:11,fontWeight:700,color:d!==null&&d<=5?C.red:C.accent,marginBottom:4}}>
+                      {d!==null&&d<=0?"⚠️ PAGO VENCIDO":d!==null&&d<=5?"🔴 PAGO PRÓXIMO":"📅 FECHA DE PAGO"}
+                    </div>
+                    <div style={{fontSize:17,fontWeight:900,color:C.text}}>{fmtDate(pd)}</div>
+                    <div style={{fontSize:12,color:C.sub,marginTop:3}}>
+                      {d!==null&&d<0?`Venció hace ${Math.abs(d)} días`:d===0?"Vence hoy":`Faltan ${d} días para pagar`}
+                    </div>
+                  </div>
+                )}
+                <div style={{display:"flex",gap:8,marginBottom:8}}>
+                  <button onClick={()=>setExpenseEdit({description:exp.description,amount:String(exp.amount),date:exp.date,categoryId:exp.categoryId,accountId:exp.accountId})}
+                    style={{flex:1,background:C.elevated,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px 0",color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                    ✏️ Editar
+                  </button>
+                  <button onClick={async()=>{
+                    if(!window.confirm("¿Eliminar este gasto?")) return;
+                    await sb.from("expenses").delete().eq("id", exp.id);
+                    const a=accounts.find(x=>x.id===exp.accountId);
+                    if(a) await sb.from("accounts").update({balance:a.type==="credit"?a.balance-exp.amount:a.balance+exp.amount}).eq("id",a.id);
+                    setShowDetail(null); setEditDate(null); setExpenseEdit(null);
+                    if(reloadAll) await reloadAll();
+                  }} style={{flex:1,background:C.redDim,border:`1px solid ${C.red}44`,borderRadius:12,padding:"11px 0",color:C.red,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                    🗑 Eliminar
+                  </button>
+                </div>
+              </>
             )}
-            <Field label="Fecha del gasto" hint="Modifica si registraste en la fecha incorrecta">
-              <input type="date" value={curDate} onChange={e=>setEditDate(e.target.value)}
-                style={{width:"100%",background:C.elevated,border:`1px solid ${dateChanged?C.accent:C.border}`,borderRadius:10,padding:"10px 12px",color:C.text,fontSize:14,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
-            </Field>
-            {dateChanged&&(
-              <button onClick={async()=>{
-                await sb.from("expenses").update({date: curDate}).eq("id", exp.id);
-                setEditDate(null);
-                if(reloadAll) await reloadAll();
-              }} style={{width:"100%",background:C.accent,border:"none",borderRadius:12,padding:"11px 0",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:8}}>
-                Guardar fecha
-              </button>
-            )}
-            <button onClick={async()=>{
-              if(!window.confirm("¿Eliminar este gasto?")) return;
-              await sb.from("expenses").delete().eq("id", exp.id);
-              const acc = accounts.find(a=>a.id===exp.accountId);
-              if(acc) await sb.from("accounts").update({balance: acc.type==="credit" ? acc.balance - exp.amount : acc.balance + exp.amount}).eq("id", acc.id);
-              setShowDetail(null);
-              setEditDate(null);
-              if(reloadAll) await reloadAll();
-            }} style={{width:"100%",background:C.redDim,border:`1px solid ${C.red}44`,borderRadius:12,padding:"11px 0",color:C.red,fontSize:13,fontWeight:700,cursor:"pointer"}}>
-              🗑 Eliminar gasto
-            </button>
           </Modal>
         );
       })()}
