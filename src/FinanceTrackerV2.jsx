@@ -1439,6 +1439,7 @@ function Subscriptions({subs, setSubs, accounts, expenses, setExpenses, categori
     const acc = accounts.find(a=>a.id===sub.accountId);
     const pd = acc?.type==="credit"&&acc.cutDay&&acc.payDay ? calcPaymentDate(chargeDate,acc.cutDay,acc.payDay) : null;
     await sb.from("expenses").insert({ user_id: session?.user?.id, description: sub.name, amount: sub.amount, date: chargeDate, account_id: sub.accountId||null, category_id: sub.categoryId||null, payment_date: pd, is_msi: false, is_tdc_payment: false, is_subscription: true });
+    if (acc) await sb.from("accounts").update({ balance: acc.type==="credit" ? acc.balance + sub.amount : acc.balance - sub.amount }).eq("id", acc.id);
     if (reloadAll) await reloadAll();
   };
 
