@@ -2001,10 +2001,10 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
           await sb.from("expenses").insert(rows);
         }
       }
-      // Update balance: only the remaining installments (unpaid months × monthly)
+      // Update balance using the exact total (avoids rounding from monthly × months)
       if (acc) {
-        const remaining = (totalM - paid) * monthly;
-        await sb.from("accounts").update({ balance: acc.type==="credit" ? acc.balance + remaining : acc.balance - remaining }).eq("id", acc.id);
+        const totalAmt = parseFloat(form.total);
+        await sb.from("accounts").update({ balance: acc.type==="credit" ? acc.balance + totalAmt : acc.balance - totalAmt }).eq("id", acc.id);
       }
     }
     closeModal();
