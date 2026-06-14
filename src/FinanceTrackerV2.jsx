@@ -1950,6 +1950,14 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
 
   const calcPaidMonths = (startDate, totalMonths) => {
     if (!startDate) return 0;
+    const acc = accounts.find(a => a.id === form.accountId);
+    if (acc?.cutDay && acc?.payDay) {
+      const payDates = getMsiPaymentDates(startDate, acc, parseInt(totalMonths)||0);
+      const now = new Date();
+      const paid = payDates.filter(pd => new Date(pd + "T12:00:00") <= now).length;
+      return Math.max(0, Math.min(paid, parseInt(totalMonths) || 0));
+    }
+    // Fallback for accounts without cut/pay days
     const start = new Date(startDate + "T00:00:00");
     const now = new Date();
     const elapsed = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
@@ -1977,18 +1985,17 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
       const acc = accounts.find(a=>a.id===form.accountId);
       const { data: planRow } = await sb.from("msi_plans").insert({ ...data, user_id: session?.user?.id }).select().single();
 
-      // Create expense rows only for remaining (unpaid) installments
+      // Create expense rows for ALL installments (past and future) so they appear in Gastos
       if (planRow && acc?.cutDay && acc?.payDay) {
         const allDates = getMsiPaymentDates(form.startDate||today(), acc, totalM);
-        const futureDates = allDates.slice(paid); // skip already-paid months
-        if (futureDates.length > 0) {
-          const rows = futureDates.map((pd, i) => ({
+        if (allDates.length > 0) {
+          const rows = allDates.map((pd, i) => ({
             user_id: session?.user?.id,
-            description: `${form.desc.trim()} (${paid + i + 1}/${totalM})`,
+            description: `${form.desc.trim()} (${i + 1}/${totalM})`,
             amount: monthly, date: pd,
             account_id: acc.id, category_id: null,
             payment_date: pd, is_msi: true,
-            msi_plan_id: planRow.id, msi_index: paid + i + 1, msi_total: totalM,
+            msi_plan_id: planRow.id, msi_index: i + 1, msi_total: totalM,
             is_tdc_payment: false, is_subscription: false,
           }));
           await sb.from("expenses").insert(rows);
