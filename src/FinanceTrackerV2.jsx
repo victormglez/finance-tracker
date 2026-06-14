@@ -1994,6 +1994,11 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
           await sb.from("expenses").insert(rows);
         }
       }
+      // Update balance: only the remaining installments (unpaid months × monthly)
+      if (acc) {
+        const remaining = (totalM - paid) * monthly;
+        await sb.from("accounts").update({ balance: acc.type==="credit" ? acc.balance + remaining : acc.balance - remaining }).eq("id", acc.id);
+      }
     }
     closeModal();
     if(reloadAll) await reloadAll();
@@ -2001,7 +2006,11 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
 
   const deletePlan = async () => {
     if(!window.confirm("¿Eliminar este plan MSI?")) return;
+    const acc = accounts.find(a=>a.id===editingPlan.accountId);
+    const remaining = (editingPlan.totalM - editingPlan.paidM) * editingPlan.monthly;
+    await sb.from("expenses").delete().eq("msi_plan_id", editingPlan.id);
     await sb.from("msi_plans").delete().eq("id", editingPlan.id);
+    if (acc) await sb.from("accounts").update({ balance: acc.type==="credit" ? acc.balance - remaining : acc.balance + remaining }).eq("id", acc.id);
     closeModal();
     if(reloadAll) await reloadAll();
   };
