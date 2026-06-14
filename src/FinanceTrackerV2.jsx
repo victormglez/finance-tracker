@@ -548,8 +548,16 @@ function Dashboard({expenses, accounts, setAccounts, categories, setCategories, 
   const currentMonth = getCurrentMonth();
   const monthExp = expenses.filter(e=>e.date.startsWith(currentMonth)&&!e.isMSIInstallment);
   const monthTotal = monthExp.reduce((s,e)=>s+e.amount,0);
-  const maxBar = Math.max(...MONTHLY_CHART.map(m=>m.total));
   const catBreakdown = categories.map(cat=>({...cat,spent:monthExp.filter(e=>e.categoryId===cat.id).reduce((s,e)=>s+e.amount,0)}));
+  const realMonthlyChart = useMemo(()=>Array.from({length:6},(_,i)=>{
+    const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-(5-i));
+    const ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const label=d.toLocaleDateString("es-MX",{month:"short"}).replace('.','').slice(0,3);
+    const cap=label.charAt(0).toUpperCase()+label.slice(1);
+    const total=expenses.filter(e=>e.date.startsWith(ym)&&!e.isMSIInstallment).reduce((s,e)=>s+e.amount,0);
+    return {month:cap,ym,total};
+  }),[expenses]);
+  const maxBar = Math.max(...realMonthlyChart.map(m=>m.total),1);
 
   // ── Accounts ──
   const [showAddAcc,setShowAddAcc]=useState(false);
@@ -619,9 +627,48 @@ function Dashboard({expenses, accounts, setAccounts, categories, setCategories, 
       {/* GASTO MENSUAL */}
       <SectionHead label="📊 Gasto Mensual" isOpen={openSections.chart} onToggle={()=>toggle("chart")} extra={mxn(monthTotal,true)} color={C.orange}/>
       <SectionBody isOpen={openSections.chart} color={C.orange}>
+        {/* Monthly bars */}
         <div style={{display:"flex",alignItems:"flex-end",gap:6,height:72}}>
-          {MONTHLY_CHART.map((m,i)=>{const h=(m.total/maxBar)*100;const last=i===MONTHLY_CHART.length-1;return(<div key={m.month} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}><div style={{fontSize:9,color:C.sub,fontWeight:700}}>{mxn(m.total,true)}</div><div style={{width:"100%",height:`${h}%`,background:last?C.accent:"#2a2a50",borderRadius:"3px 3px 0 0",minHeight:4}}/><div style={{fontSize:9,color:last?C.accent:C.muted,fontWeight:700}}>{m.month}</div></div>);})}
+          {realMonthlyChart.map((m,i)=>{
+            const h=maxBar>0?(m.total/maxBar)*100:0;
+            const last=i===realMonthlyChart.length-1;
+            return(
+              <div key={m.month} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                <div style={{fontSize:9,color:C.sub,fontWeight:700}}>{m.total>0?mxn(m.total,true):""}</div>
+                <div style={{width:"100%",height:`${Math.max(h,m.total>0?4:0)}%`,background:last?C.orange:"#2a2a50",borderRadius:"3px 3px 0 0",minHeight:m.total>0?4:0}}/>
+                <div style={{fontSize:9,color:last?C.orange:C.muted,fontWeight:700}}>{m.month}</div>
+              </div>
+            );
+          })}
         </div>
+        {/* Category breakdown */}
+        {catBreakdown.filter(c=>c.spent>0).length>0&&(
+          <div style={{marginTop:14,borderTop:`1px solid ${C.border}`,paddingTop:12,display:"flex",flexDirection:"column",gap:9}}>
+            {catBreakdown.filter(c=>c.spent>0).sort((a,b)=>b.spent-a.spent).map(cat=>{
+              const pct=cat.budget>0?Math.min(100,cat.spent/cat.budget*100):null;
+              const overBudget=pct!==null&&pct>=100;
+              return(
+                <div key={cat.id} style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:15,width:20,textAlign:"center",flexShrink:0}}>{cat.icon||"📦"}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:pct!==null?4:0}}>
+                      <span style={{fontSize:12,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cat.name}</span>
+                      <span style={{fontSize:12,fontWeight:800,color:overBudget?C.red:C.text,flexShrink:0,marginLeft:6}}>{mxn(cat.spent)}</span>
+                    </div>
+                    {pct!==null&&(
+                      <div style={{height:4,background:C.border,borderRadius:2,overflow:"hidden"}}>
+                        <div style={{height:"100%",width:`${pct}%`,background:overBudget?C.red:cat.color||C.accent,borderRadius:2,transition:"width .3s"}}/>
+                      </div>
+                    )}
+                  </div>
+                  {pct!==null&&(
+                    <span style={{fontSize:10,color:overBudget?C.red:C.sub,fontWeight:700,width:30,textAlign:"right",flexShrink:0}}>{Math.round(pct)}%</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </SectionBody>
 
       {/* TRANSFERENCIAS RECIBIDAS */}
@@ -1985,17 +2032,18 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
       const acc = accounts.find(a=>a.id===form.accountId);
       const { data: planRow } = await sb.from("msi_plans").insert({ ...data, user_id: session?.user?.id }).select().single();
 
-      // Create expense rows for ALL installments (past and future) so they appear in Gastos
+      // Create expense rows only for upcoming installments (past ones already happened)
       if (planRow && acc?.cutDay && acc?.payDay) {
         const allDates = getMsiPaymentDates(form.startDate||today(), acc, totalM);
-        if (allDates.length > 0) {
-          const rows = allDates.map((pd, i) => ({
+        const futureDates = allDates.slice(paid);
+        if (futureDates.length > 0) {
+          const rows = futureDates.map((pd, i) => ({
             user_id: session?.user?.id,
-            description: `${form.desc.trim()} (${i + 1}/${totalM})`,
+            description: `${form.desc.trim()} (${paid + i + 1}/${totalM})`,
             amount: monthly, date: pd,
             account_id: acc.id, category_id: null,
             payment_date: pd, is_msi: true,
-            msi_plan_id: planRow.id, msi_index: i + 1, msi_total: totalM,
+            msi_plan_id: planRow.id, msi_index: paid + i + 1, msi_total: totalM,
             is_tdc_payment: false, is_subscription: false,
           }));
           await sb.from("expenses").insert(rows);
