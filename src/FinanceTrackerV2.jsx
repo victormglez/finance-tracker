@@ -1869,7 +1869,7 @@ function MSISummary({calcPaidMonths, form, C, mxn}) {
   const paid = calcPaidMonths(form.startDate, form.months);
   const totalM = parseInt(form.months)||0;
   const rem = Math.max(0, totalM - paid);
-  const monthly = parseFloat(form.monthly)||0;
+  const monthly = totalM > 0 && parseFloat(form.total) > 0 ? Math.round((parseFloat(form.total)/totalM)*100)/100 : 0;
   return (
     <div style={{background:C.elevated,borderRadius:11,padding:"11px 13px",marginBottom:14,border:`1px solid ${paid>0?C.orange+"55":C.border}`,borderLeft:`3px solid ${paid>0?C.orange:C.border}`}}>
       <div style={{fontSize:11,fontWeight:700,color:C.sub,textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Resumen estimado</div>
@@ -1965,10 +1965,10 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
   const closeModal = () => { setShowModal(false); setEditingPlan(null); setForm(emptyForm); };
 
   const save = async () => {
-    if(!form.desc||!form.total||!form.monthly) return;
+    if(!form.desc||!form.total) return;
     const paid = editingPlan ? parseInt(form.paidMonths)||0 : calcPaidMonths(form.startDate, form.months);
     const totalM = parseInt(form.months)||0;
-    const monthly = parseFloat(form.monthly);
+    const monthly = Math.round((parseFloat(form.total)/totalM)*100)/100;
     const data = { description:form.desc.trim(), total_amount:parseFloat(form.total), monthly_payment:monthly, total_months:totalM, paid_months:paid, account_id:form.accountId||null, start_date:form.startDate||today() };
 
     if (editingPlan) {
@@ -2080,11 +2080,16 @@ function MSI({plans, setPlans, accounts, session, reloadAll}) {
 
       <Modal open={showModal} onClose={closeModal} title={editingPlan ? "Editar Plan MSI" : "Nuevo Plan MSI"}>
         <Field label="Descripción"><Input value={form.desc} onChange={v=>setForm(f=>({...f,desc:v}))} placeholder="Ej. MacBook Pro..."/></Field>
-        <Field label="Monto Total (MXN)"><Input value={form.total} onChange={v=>setForm(f=>({...f,total:v}))} placeholder="0.00" type="number"/></Field>
-        <Field label="Pago Mensual (MXN)"><Input value={form.monthly} onChange={v=>setForm(f=>({...f,monthly:v}))} placeholder="0.00" type="number"/></Field>
         <Field label="Número de MSI">
           <ChipSelect options={["3","6","9","12","18","24"]} value={form.months} onChange={v=>setForm(f=>({...f,months:v}))}/>
         </Field>
+        <Field label="Monto Total (MXN)"><Input value={form.total} onChange={v=>setForm(f=>({...f,total:v}))} placeholder="0.00" type="number"/></Field>
+        {form.total&&!isNaN(parseFloat(form.total))&&parseInt(form.months)>0&&(
+          <div style={{background:C.orangeDim,borderRadius:12,padding:"10px 14px",marginBottom:14,border:`1px solid ${C.orange}44`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:12,color:C.orange,fontWeight:700}}>📅 Pago mensual calculado</span>
+            <span style={{fontSize:16,fontWeight:900,color:C.text}}>{mxn(Math.round((parseFloat(form.total)/parseInt(form.months))*100)/100)}</span>
+          </div>
+        )}
         <Field label="Tarjeta">
           <ChipSelect options={accounts.filter(a=>a.type==="credit")} value={form.accountId} onChange={v=>setForm(f=>({...f,accountId:v}))} getColor={a=>a.color}/>
         </Field>
