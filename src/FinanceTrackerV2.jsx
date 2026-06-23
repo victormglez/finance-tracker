@@ -859,6 +859,7 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
   const [showPayTDC, setShowPayTDC] = useState(false);
   const [payTDCForm, setPayTDCForm] = useState({accountId:accounts.find(a=>a.type==="credit")?.id||2, amount:""});
   const [openMonths, setOpenMonths] = useState({});
+  const [openDays, setOpenDays] = useState({});
   const [form, setForm] = useState({description:"",amount:"",date:today(),accountId:accounts[0]?.id||1,categoryId:categories[0]?.id||1,isMSI:false,msiMonths:"9",linkedGoalId:null});
 
   // Group ALL expenses by month → then by date within month
@@ -913,6 +914,7 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
   }, []);
 
   const toggleMonth = (mk) => setOpenMonths(prev=>({...prev,[mk]:!prev[mk]}));
+  const toggleDay = (mk, date) => setOpenDays(prev=>({...prev,[mk+"_"+date]:!(prev[mk+"_"+date]??true)}));
 
   const monthLabel = (mk) => {
     const [y,m] = mk.split("-");
@@ -1137,16 +1139,29 @@ function Expenses({expenses, setExpenses, accounts, setAccounts, subs, plans, se
                   )}
 
                   {/* Real expense rows grouped by date */}
-                  {sortedDates.map(date=>(
-                    <div key={date}>
-                      <div style={{fontSize:10,fontWeight:800,color:C.muted,textTransform:"uppercase",letterSpacing:1,margin:"10px 0 6px",paddingLeft:2}}>
-                        {parseDate(date).toLocaleDateString("es-MX",{weekday:"short",day:"numeric",month:"short"})}
+                  {sortedDates.map(date=>{
+                    const dayKey = mk+"_"+date;
+                    const isDayOpen = openDays[dayKey]??(date===sortedDates[0]);
+                    const dayTotal = byDate[date].reduce((s,e)=>s+e.amount,0);
+                    return (
+                      <div key={date}>
+                        <button onClick={()=>toggleDay(mk,date)} style={{
+                          width:"100%",background:"none",border:"none",cursor:"pointer",
+                          padding:"6px 2px 4px",display:"flex",alignItems:"center",gap:6,
+                          borderRadius:6,
+                        }}>
+                          <div style={{fontSize:10,fontWeight:800,color:C.muted,textTransform:"uppercase",letterSpacing:1,flex:1,textAlign:"left"}}>
+                            {parseDate(date).toLocaleDateString("es-MX",{weekday:"short",day:"numeric",month:"short"})}
+                          </div>
+                          {!isDayOpen&&<div style={{fontSize:10,fontWeight:700,color:C.muted}}>{mxn(dayTotal)}</div>}
+                          <div style={{fontSize:11,color:C.muted,transition:"transform .2s",transform:isDayOpen?"rotate(180deg)":"rotate(0deg)"}}>▾</div>
+                        </button>
+                        {isDayOpen&&byDate[date].map(exp=>(
+                          <ExpenseRow key={exp.id} exp={exp} accounts={accounts} categories={categories} onClick={()=>setShowDetail(exp)}/>
+                        ))}
                       </div>
-                      {byDate[date].map(exp=>(
-                        <ExpenseRow key={exp.id} exp={exp} accounts={accounts} categories={categories} onClick={()=>setShowDetail(exp)}/>
-                      ))}
-                    </div>
-                  ))}
+                    );
+                  })}
 
                   {realExpenses.length===0&&visiblePayments.length===0&&(
                     <div style={{textAlign:"center",padding:"20px 0",color:C.muted,fontSize:12}}>Sin gastos este mes</div>
