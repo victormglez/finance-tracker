@@ -6169,6 +6169,19 @@ function MSI({ plans, setPlans, accounts, session, reloadAll }) {
 
     if (editingPlan) {
       await sb.from("msi_plans").update(data).eq("id", editingPlan.id);
+      // Sync the individual expense rows with the new amount and description
+      const { data: msiRows } = await sb
+        .from("expenses")
+        .select("id, msi_index")
+        .eq("msi_plan_id", editingPlan.id);
+      if (msiRows?.length) {
+        await Promise.all(msiRows.map((row) =>
+          sb.from("expenses").update({
+            amount: monthly,
+            description: `${form.desc.trim()} (${row.msi_index}/${totalM})`,
+          }).eq("id", row.id)
+        ));
+      }
     } else {
       const acc = accounts.find((a) => a.id === form.accountId);
       const { data: planRow } = await sb
