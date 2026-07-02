@@ -2843,6 +2843,7 @@ function Expenses({
   });
   const [openMonths, setOpenMonths] = useState({});
   const [openDays, setOpenDays] = useState({});
+  const [openPayments, setOpenPayments] = useState({});
   const [form, setForm] = useState({
     description: "",
     amount: "",
@@ -2923,6 +2924,8 @@ function Expenses({
       ...prev,
       [mk + "_" + date]: !(prev[mk + "_" + date] ?? true),
     }));
+  const togglePayments = (mk) =>
+    setOpenPayments((prev) => ({ ...prev, [mk]: !(prev[mk] ?? true) }));
 
   const monthLabel = (mk) => {
     const [y, m] = mk.split("-");
@@ -3288,20 +3291,28 @@ function Expenses({
                   {/* Payment-due rows — one card per credit card */}
                   {visiblePayments.length > 0 && (
                     <div style={{ marginBottom: 4 }}>
-                      <div
+                      <button
+                        onClick={() => togglePayments(mk)}
                         style={{
-                          fontSize: 10,
-                          fontWeight: 800,
-                          color: C.red,
-                          textTransform: "uppercase",
-                          letterSpacing: 1,
-                          margin: "10px 0 6px",
-                          paddingLeft: 2,
+                          width: "100%", background: "none", border: "none",
+                          cursor: "pointer", padding: "6px 2px 4px",
+                          display: "flex", alignItems: "center", gap: 6,
+                          borderRadius: 6,
                         }}
                       >
-                        💳 Pagos de Tarjeta
-                      </div>
-                      {visiblePayments.map((p) => {
+                        <div style={{
+                          fontSize: 10, fontWeight: 800, color: C.red,
+                          textTransform: "uppercase", letterSpacing: 1, flex: 1, textAlign: "left",
+                        }}>
+                          💳 Pagos de Tarjeta
+                        </div>
+                        <div style={{
+                          fontSize: 11, color: C.red,
+                          transition: "transform .2s",
+                          transform: (openPayments[mk] ?? true) ? "rotate(180deg)" : "rotate(0deg)",
+                        }}>▾</div>
+                      </button>
+                      {(openPayments[mk] ?? true) && visiblePayments.map((p) => {
                         const acc = accounts.find((a) => a.id === p.accountId);
                         const d = daysUntil(p.paymentDate);
                         const overdue = d < 0;
