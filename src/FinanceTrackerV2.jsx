@@ -728,7 +728,7 @@ function ChipSelect({ options, value, onChange, getColor, getLabel }) {
         return (
           <button
             key={key}
-            onClick={() => onChange(key)}
+            onClick={() => onChange(active ? null : key)}
             style={{
               padding: "6px 11px",
               borderRadius: 99,
@@ -1743,6 +1743,7 @@ function Dashboard({
 
   // ── Transfers ──
   const [showAddTrans, setShowAddTrans] = useState(false);
+  const [editingTrans, setEditingTrans] = useState(null);
   const emptyTransForm = {
     type: "received",
     amount: "",
@@ -1831,6 +1832,37 @@ function Dashboard({
         .eq("id", acc.id);
     setTransForm(emptyTransForm);
     setShowAddTrans(false);
+    if (reloadAll) await reloadAll();
+  };
+  const updateTrans = async () => {
+    if (!transForm.amount || !transForm.counterparty.trim()) return;
+    const amt = parseFloat(transForm.amount);
+    if (isNaN(amt) || amt <= 0) return;
+    const orig = editingTrans;
+    const origAcc = accounts.find((a) => a.id === orig.accountId);
+    const newAcc = accounts.find((a) => a.id === transForm.accountId);
+    await sb.from("transfers").update({
+      amount: amt,
+      account_id: transForm.accountId || null,
+      counterparty: transForm.counterparty.trim(),
+      date: transForm.date,
+      notes: transForm.notes || null,
+    }).eq("id", orig.id);
+    // Reverse old balance effect, apply new one
+    const isRec = orig.type === "received";
+    if (origAcc)
+      await sb.from("accounts").update({ balance: origAcc.balance + (isRec ? -orig.amount : orig.amount) }).eq("id", origAcc.id);
+    if (newAcc)
+      await sb.from("accounts").update({ balance: newAcc.balance + (isRec ? amt : -amt) }).eq("id", newAcc.id);
+    setEditingTrans(null);
+    if (reloadAll) await reloadAll();
+  };
+  const deleteTrans = async (t) => {
+    if (!window.confirm("¿Eliminar esta transferencia?")) return;
+    await sb.from("transfers").delete().eq("id", t.id);
+    const acc = accounts.find((a) => a.id === t.accountId);
+    if (acc)
+      await sb.from("accounts").update({ balance: acc.balance + (t.type === "received" ? -t.amount : t.amount) }).eq("id", acc.id);
     if (reloadAll) await reloadAll();
   };
   const saveCat = async () => {
@@ -1936,16 +1968,6 @@ function Dashboard({
               month: "long",
             })}
           </div>
-        </div>
-        <div
-          style={{
-            background: C.greenDim,
-            borderRadius: 14,
-            padding: 10,
-            fontSize: 22,
-          }}
-        >
-          📊
         </div>
       </div>
 
@@ -2077,36 +2099,17 @@ function Dashboard({
                       >
                         <span style={{ fontSize: 18 }}>📥</span>
                         <div style={{ flex: 1 }}>
-                          <div
-                            style={{
-                              fontSize: 13,
-                              fontWeight: 700,
-                              color: C.text,
-                            }}
-                          >
-                            De:{" "}
-                            <span style={{ color: C.green }}>
-                              {t.counterparty}
-                            </span>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+                            De: <span style={{ color: C.green }}>{t.counterparty}</span>
                           </div>
-                          <div
-                            style={{ display: "flex", gap: 5, marginTop: 2 }}
-                          >
+                          <div style={{ display: "flex", gap: 5, marginTop: 2 }}>
                             {acc && <Tag color={acc.color}>{acc.name}</Tag>}
-                            <span style={{ fontSize: 10, color: C.muted }}>
-                              {fmtDateShort(t.date)}
-                            </span>
+                            <span style={{ fontSize: 10, color: C.muted }}>{fmtDateShort(t.date)}</span>
                           </div>
                         </div>
-                        <span
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 900,
-                            color: C.green,
-                          }}
-                        >
-                          +{mxn(t.amount)}
-                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 900, color: C.green }}>+{mxn(t.amount)}</span>
+                        <button onClick={() => { setTransForm({ type: t.type, amount: String(t.amount), accountId: t.accountId, counterparty: t.counterparty, date: t.date, notes: t.notes || "" }); setEditingTrans(t); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: C.sub, padding: "2px 4px" }}>✏️</button>
+                        <button onClick={() => deleteTrans(t)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: C.red, padding: "2px 4px" }}>🗑</button>
                       </div>
                     );
                   })}
@@ -2419,6 +2422,23 @@ function Dashboard({
         </SaveBtn>
       </Modal>
 
+      {/* Edit Transfer Modal */}
+      <Modal open={!!editingTrans} onClose={() => setEditingTrans(null)} title="Editar Transferencia">
+        <Field label={transForm.type === "received" ? "¿De quién recibiste?" : "¿A quién enviaste?"}>
+          <Input value={transForm.counterparty} onChange={(v) => setTransForm((f) => ({ ...f, counterparty: v }))} placeholder="Nombre o empresa..." />
+        </Field>
+        <Field label="Monto (MXN)">
+          <Input value={transForm.amount} onChange={(v) => setTransForm((f) => ({ ...f, amount: v }))} placeholder="$0.00" type="number" />
+        </Field>
+        <Field label="Fecha">
+          <Input value={transForm.date} onChange={(v) => setTransForm((f) => ({ ...f, date: v }))} type="date" />
+        </Field>
+        <Field label="Notas (opcional)">
+          <Input value={transForm.notes} onChange={(v) => setTransForm((f) => ({ ...f, notes: v }))} placeholder="Ej. Pago de renta..." />
+        </Field>
+        <SaveBtn onClick={updateTrans} color={C.accent}>Guardar Cambios</SaveBtn>
+      </Modal>
+
       <Modal
         open={showAddCat}
         onClose={() => {
@@ -2679,7 +2699,7 @@ function Expenses({
     amount: "",
     date: today(),
     accountId: accounts[0]?.id || 1,
-    categoryId: categories[0]?.id || 1,
+    categoryId: null,
     isMSI: false,
     msiMonths: "9",
     linkedGoalId: null,
@@ -3139,10 +3159,10 @@ function Expenses({
                         <div style={{
                           fontSize: 11, color: C.red,
                           transition: "transform .2s",
-                          transform: (openPayments[mk] ?? true) ? "rotate(180deg)" : "rotate(0deg)",
+                          transform: (openPayments[mk] ?? false) ? "rotate(180deg)" : "rotate(0deg)",
                         }}>▾</div>
                       </button>
-                      {(openPayments[mk] ?? true) && visiblePayments.map((p) => {
+                      {(openPayments[mk] ?? false) && visiblePayments.map((p) => {
                         const acc = accounts.find((a) => a.id === p.accountId);
                         const d = daysUntil(p.paymentDate);
                         const overdue = d < 0;
