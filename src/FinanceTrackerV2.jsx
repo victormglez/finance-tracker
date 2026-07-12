@@ -1848,12 +1848,17 @@ function Dashboard({
       date: transForm.date,
       notes: transForm.notes || null,
     }).eq("id", orig.id);
-    // Reverse old balance effect, apply new one
     const isRec = orig.type === "received";
-    if (origAcc)
-      await sb.from("accounts").update({ balance: origAcc.balance + (isRec ? -orig.amount : orig.amount) }).eq("id", origAcc.id);
-    if (newAcc)
-      await sb.from("accounts").update({ balance: newAcc.balance + (isRec ? amt : -amt) }).eq("id", newAcc.id);
+    if (origAcc?.id === newAcc?.id) {
+      // Same account: reverse old + apply new in one step to avoid stale-state overwrite
+      if (origAcc)
+        await sb.from("accounts").update({ balance: origAcc.balance + (isRec ? -orig.amount + amt : orig.amount - amt) }).eq("id", origAcc.id);
+    } else {
+      if (origAcc)
+        await sb.from("accounts").update({ balance: origAcc.balance + (isRec ? -orig.amount : orig.amount) }).eq("id", origAcc.id);
+      if (newAcc)
+        await sb.from("accounts").update({ balance: newAcc.balance + (isRec ? amt : -amt) }).eq("id", newAcc.id);
+    }
     setEditingTrans(null);
     if (reloadAll) await reloadAll();
   };
@@ -2429,6 +2434,31 @@ function Dashboard({
         </Field>
         <Field label="Monto (MXN)">
           <Input value={transForm.amount} onChange={(v) => setTransForm((f) => ({ ...f, amount: v }))} placeholder="$0.00" type="number" />
+        </Field>
+        <Field label={transForm.type === "received" ? "Depositar en" : "Retirar de"}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            {accounts.map((acc) => {
+              const sel = transForm.accountId === acc.id;
+              const isRec = transForm.type === "received";
+              const newBal = transForm.amount && !isNaN(parseFloat(transForm.amount)) && sel
+                ? acc.balance + (isRec ? parseFloat(transForm.amount) : -parseFloat(transForm.amount))
+                : null;
+              return (
+                <button key={acc.id} onClick={() => setTransForm((f) => ({ ...f, accountId: acc.id }))}
+                  style={{ display: "flex", alignItems: "center", gap: 10, background: sel ? acc.color + "22" : C.card, border: `1.5px solid ${sel ? acc.color : C.border}`, borderRadius: 11, padding: "9px 12px", cursor: "pointer" }}>
+                  <span style={{ fontSize: 18 }}>{acc.type === "debit" ? "🏦" : "💳"}</span>
+                  <div style={{ flex: 1, textAlign: "left" }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: C.text }}>{acc.name}</div>
+                    <div style={{ fontSize: 10, color: C.sub }}>
+                      {mxn(acc.balance)}
+                      {newBal !== null && <span style={{ color: isRec ? C.green : C.red }}> → {mxn(newBal)}</span>}
+                    </div>
+                  </div>
+                  {sel && <span style={{ color: acc.color }}>✓</span>}
+                </button>
+              );
+            })}
+          </div>
         </Field>
         <Field label="Fecha">
           <Input value={transForm.date} onChange={(v) => setTransForm((f) => ({ ...f, date: v }))} type="date" />
