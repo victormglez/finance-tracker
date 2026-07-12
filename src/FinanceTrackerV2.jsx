@@ -1754,6 +1754,37 @@ function Dashboard({
   };
   const [transForm, setTransForm] = useState(emptyTransForm);
 
+  // ── Goal Withdrawals ──
+  const [editingGW, setEditingGW] = useState(null);
+  const [gwForm, setGwForm] = useState({ amount: "", date: "", concept: "", accountId: "" });
+  const deleteGW = async (w) => {
+    if (!window.confirm("¿Eliminar este retiro? El monto regresará a la meta.")) return;
+    await sb.from("goal_withdrawals").delete().eq("id", w.id);
+    const acc = accounts.find((a) => a.id === w.accountId);
+    const goal = goals.find((g) => g.id === w.goalId);
+    if (acc) await sb.from("accounts").update({ balance: acc.balance - w.amount }).eq("id", acc.id);
+    if (goal) await sb.from("goals").update({ current_amount: goal.current + w.amount }).eq("id", goal.id);
+    if (reloadAll) await reloadAll();
+  };
+  const updateGW = async () => {
+    if (!editingGW) return;
+    const newAmt = parseFloat(gwForm.amount);
+    if (isNaN(newAmt) || newAmt <= 0) return;
+    const origAcc = accounts.find((a) => a.id === editingGW.accountId);
+    const newAcc = accounts.find((a) => a.id === gwForm.accountId);
+    const goal = goals.find((g) => g.id === editingGW.goalId);
+    await sb.from("goal_withdrawals").update({ amount: newAmt, date: gwForm.date, concept: gwForm.concept || null, account_id: gwForm.accountId }).eq("id", editingGW.id);
+    if (origAcc?.id === newAcc?.id) {
+      if (origAcc) await sb.from("accounts").update({ balance: origAcc.balance - editingGW.amount + newAmt }).eq("id", origAcc.id);
+    } else {
+      if (origAcc) await sb.from("accounts").update({ balance: origAcc.balance - editingGW.amount }).eq("id", origAcc.id);
+      if (newAcc) await sb.from("accounts").update({ balance: newAcc.balance + newAmt }).eq("id", newAcc.id);
+    }
+    if (goal) await sb.from("goals").update({ current_amount: goal.current + editingGW.amount - newAmt }).eq("id", goal.id);
+    setEditingGW(null);
+    if (reloadAll) await reloadAll();
+  };
+
   // ── Categories ──
   const [showAddCat, setShowAddCat] = useState(false);
   const [editingCat, setEditingCat] = useState(null);
@@ -1803,6 +1834,7 @@ function Dashboard({
   const [openSections, setOpenSections] = useState({
     accounts: true,
     transfers: false,
+    withdrawals: false,
     cats: false,
   });
   const toggle = (k) => setOpenSections((s) => ({ ...s, [k]: !s[k] }));
@@ -2000,14 +2032,10 @@ function Dashboard({
         </div>
       </SectionBody>
 
-      {/* TRANSFERENCIAS RECIBIDAS */}
+      {/* TRANSFERENCIAS */}
       {(() => {
         const visTransfers = transfers.filter(
           (t) => !t.counterparty?.startsWith("__goal__"),
-        );
-        const totalCount = visTransfers.length + (goalWithdrawals || []).length;
-        const gwSorted = [...(goalWithdrawals || [])].sort((a, b) =>
-          b.date.localeCompare(a.date),
         );
         return (
           <>
@@ -2015,7 +2043,7 @@ function Dashboard({
               label="↕️ Transferencias"
               isOpen={openSections.transfers}
               onToggle={() => toggle("transfers")}
-              count={totalCount}
+              count={visTransfers.length}
               color={C.green}
               onAdd={() => {
                 setTransForm(emptyTransForm);
@@ -2024,103 +2052,81 @@ function Dashboard({
               addLabel="Registrar"
             />
             <SectionBody isOpen={openSections.transfers} color={C.green}>
-              {totalCount === 0 ? (
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "10px 0",
-                    color: C.muted,
-                    fontSize: 12,
-                  }}
-                >
+              {visTransfers.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "10px 0", color: C.muted, fontSize: 12 }}>
                   Sin transferencias registradas
                 </div>
               ) : (
-                <>
-                  {gwSorted.map((w) => {
-                    const acc = accounts.find((a) => a.id === w.accountId);
-                    const goal = goals.find((g) => g.id === w.goalId);
-                    return (
-                      <div
-                        key={w.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 9,
-                          padding: "8px 0",
-                          borderBottom: `1px solid ${C.border}`,
-                        }}
-                      >
-                        <span style={{ fontSize: 18 }}>💸</span>
-                        <div style={{ flex: 1 }}>
-                          <div
-                            style={{
-                              fontSize: 13,
-                              fontWeight: 700,
-                              color: C.text,
-                            }}
-                          >
-                            {goal?.name || "Meta"}
-                            {w.concept && (
-                              <span style={{ color: C.sub, fontWeight: 400 }}>
-                                {" "}
-                                · {w.concept}
-                              </span>
-                            )}
-                          </div>
-                          <div
-                            style={{ display: "flex", gap: 5, marginTop: 2 }}
-                          >
-                            {acc && <Tag color={acc.color}>{acc.name}</Tag>}
-                            <span style={{ fontSize: 10, color: C.muted }}>
-                              {fmtDateShort(w.date)}
-                            </span>
-                          </div>
+                visTransfers.slice(0, 8).map((t) => {
+                  const acc = accounts.find((a) => a.id === t.accountId);
+                  const isSent = t.type === "sent";
+                  return (
+                    <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 0", borderBottom: `1px solid ${C.border}` }}>
+                      <span style={{ fontSize: 18 }}>{isSent ? "📤" : "📥"}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+                          {isSent ? "A: " : "De: "}
+                          <span style={{ color: isSent ? C.red : C.green }}>{t.counterparty}</span>
                         </div>
-                        <span
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 900,
-                            color: C.green,
-                          }}
-                        >
-                          +{mxn(w.amount)}
-                        </span>
-                      </div>
-                    );
-                  })}
-                  {visTransfers.slice(0, 8).map((t) => {
-                    const acc = accounts.find((a) => a.id === t.accountId);
-                    const isSent = t.type === "sent";
-                    return (
-                      <div
-                        key={t.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 9,
-                          padding: "8px 0",
-                          borderBottom: `1px solid ${C.border}`,
-                        }}
-                      >
-                        <span style={{ fontSize: 18 }}>{isSent ? "📤" : "📥"}</span>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
-                            {isSent ? "A: " : "De: "}
-                            <span style={{ color: isSent ? C.red : C.green }}>{t.counterparty}</span>
-                          </div>
-                          <div style={{ display: "flex", gap: 5, marginTop: 2 }}>
-                            {acc && <Tag color={acc.color}>{acc.name}</Tag>}
-                            <span style={{ fontSize: 10, color: C.muted }}>{fmtDateShort(t.date)}</span>
-                          </div>
+                        <div style={{ display: "flex", gap: 5, marginTop: 2 }}>
+                          {acc && <Tag color={acc.color}>{acc.name}</Tag>}
+                          <span style={{ fontSize: 10, color: C.muted }}>{fmtDateShort(t.date)}</span>
                         </div>
-                        <span style={{ fontSize: 13, fontWeight: 900, color: isSent ? C.red : C.green }}>{isSent ? "−" : "+"}{mxn(t.amount)}</span>
-                        <button onClick={() => { setTransForm({ type: t.type, amount: String(t.amount), accountId: t.accountId, counterparty: t.counterparty, date: t.date, notes: t.notes || "" }); setEditingTrans(t); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: C.sub, padding: "2px 4px" }}>✏️</button>
-                        <button onClick={() => deleteTrans(t)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: C.red, padding: "2px 4px" }}>🗑</button>
                       </div>
-                    );
-                  })}
-                </>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: isSent ? C.red : C.green }}>{isSent ? "−" : "+"}{mxn(t.amount)}</span>
+                      <button onClick={() => { setTransForm({ type: t.type, amount: String(t.amount), accountId: t.accountId, counterparty: t.counterparty, date: t.date, notes: t.notes || "" }); setEditingTrans(t); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: C.sub, padding: "2px 4px" }}>✏️</button>
+                      <button onClick={() => deleteTrans(t)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: C.red, padding: "2px 4px" }}>🗑</button>
+                    </div>
+                  );
+                })
+              )}
+            </SectionBody>
+          </>
+        );
+      })()}
+
+      {/* RETIROS DE METAS */}
+      {(() => {
+        const gwSorted = [...(goalWithdrawals || [])].sort((a, b) =>
+          b.date.localeCompare(a.date),
+        );
+        return (
+          <>
+            <SectionHead
+              label="💸 Retiros de Metas"
+              isOpen={openSections.withdrawals}
+              onToggle={() => toggle("withdrawals")}
+              count={gwSorted.length}
+              color={C.accent}
+            />
+            <SectionBody isOpen={openSections.withdrawals} color={C.accent}>
+              {gwSorted.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "10px 0", color: C.muted, fontSize: 12 }}>
+                  Sin retiros de metas
+                </div>
+              ) : (
+                gwSorted.map((w) => {
+                  const acc = accounts.find((a) => a.id === w.accountId);
+                  const goal = goals.find((g) => g.id === w.goalId);
+                  return (
+                    <div key={w.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 0", borderBottom: `1px solid ${C.border}` }}>
+                      <span style={{ fontSize: 18 }}>💸</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+                          {goal?.name || "Meta"}
+                          {w.concept && <span style={{ color: C.sub, fontWeight: 400 }}> · {w.concept}</span>}
+                        </div>
+                        <div style={{ display: "flex", gap: 5, marginTop: 2 }}>
+                          {acc && <Tag color={acc.color}>{acc.name}</Tag>}
+                          <span style={{ fontSize: 10, color: C.muted }}>{fmtDateShort(w.date)}</span>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: C.green }}>+{mxn(w.amount)}</span>
+                      <button onClick={() => { setGwForm({ amount: String(w.amount), date: w.date, concept: w.concept || "", accountId: w.accountId }); setEditingGW(w); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: C.sub, padding: "2px 4px" }}>✏️</button>
+                      <button onClick={() => deleteGW(w)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: C.red, padding: "2px 4px" }}>🗑</button>
+                    </div>
+                  );
+                })
               )}
             </SectionBody>
           </>
@@ -2430,6 +2436,38 @@ function Dashboard({
       </Modal>
 
       {/* Edit Transfer Modal */}
+      {/* Edit Goal Withdrawal */}
+      <Modal open={!!editingGW} onClose={() => setEditingGW(null)} title={`✏️ Editar Retiro · ${goals.find((g) => g.id === editingGW?.goalId)?.name || "Meta"}`}>
+        <Field label="Monto (MXN)">
+          <Input value={gwForm.amount} onChange={(v) => setGwForm((f) => ({ ...f, amount: v }))} placeholder="$0.00" type="number" />
+        </Field>
+        <Field label="Depositar en">
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            {accounts.map((acc) => {
+              const sel = gwForm.accountId === acc.id;
+              return (
+                <button key={acc.id} onClick={() => setGwForm((f) => ({ ...f, accountId: acc.id }))}
+                  style={{ display: "flex", alignItems: "center", gap: 10, background: sel ? acc.color + "22" : C.card, border: `1.5px solid ${sel ? acc.color : C.border}`, borderRadius: 11, padding: "9px 12px", cursor: "pointer" }}>
+                  <span style={{ fontSize: 18 }}>{acc.type === "debit" ? "🏦" : "💳"}</span>
+                  <div style={{ flex: 1, textAlign: "left" }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: C.text }}>{acc.name}</div>
+                    <div style={{ fontSize: 10, color: C.sub }}>{mxn(acc.balance)}</div>
+                  </div>
+                  {sel && <span style={{ color: acc.color }}>✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+        <Field label="Fecha">
+          <Input value={gwForm.date} onChange={(v) => setGwForm((f) => ({ ...f, date: v }))} type="date" />
+        </Field>
+        <Field label="Concepto (opcional)">
+          <Input value={gwForm.concept} onChange={(v) => setGwForm((f) => ({ ...f, concept: v }))} placeholder="Ej. Pago inicial..." />
+        </Field>
+        <SaveBtn onClick={updateGW} color={C.green}>Guardar Cambios</SaveBtn>
+      </Modal>
+
       <Modal open={!!editingTrans} onClose={() => setEditingTrans(null)} title="Editar Transferencia">
         <Field label={transForm.type === "received" ? "¿De quién recibiste?" : "¿A quién enviaste?"}>
           <Input value={transForm.counterparty} onChange={(v) => setTransForm((f) => ({ ...f, counterparty: v }))} placeholder="Nombre o empresa..." />
