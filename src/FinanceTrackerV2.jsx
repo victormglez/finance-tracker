@@ -2706,13 +2706,33 @@ function Expenses({
       return new Set();
     }
   });
-  const togglePaid = (payKey) => {
+  const [msiConfirmPayment, setMsiConfirmPayment] = useState(null);
+  const togglePaid = (payKey, payment) => {
     setPaidPayments((prev) => {
       const next = new Set(prev);
-      next.has(payKey) ? next.delete(payKey) : next.add(payKey);
+      const wasAlreadyPaid = prev.has(payKey);
+      wasAlreadyPaid ? next.delete(payKey) : next.add(payKey);
       localStorage.setItem("paidTdcPayments", JSON.stringify([...next]));
+      if (!wasAlreadyPaid && payment) {
+        const msiItems = payment.items.filter((e) => e.msiPlanId);
+        if (msiItems.length > 0) setMsiConfirmPayment(payment);
+      }
       return next;
     });
+  };
+  const markMsiInstallmentsPaid = async () => {
+    if (!msiConfirmPayment) return;
+    const msiItems = msiConfirmPayment.items.filter((e) => e.msiPlanId);
+    const planIds = [...new Set(msiItems.map((e) => e.msiPlanId))];
+    await Promise.all(planIds.map(async (planId) => {
+      const plan = plans.find((pl) => pl.id === planId);
+      if (plan) {
+        const newPaid = Math.min(plan.paidM + 1, plan.totalM);
+        await sb.from("msi_plans").update({ paid_months: newPaid }).eq("id", planId);
+      }
+    }));
+    setMsiConfirmPayment(null);
+    if (reloadAll) await reloadAll();
   };
   const [nextId, setNextId] = useState(200);
   const [nextPlanId, setNextPlanId] = useState(100);
@@ -3321,7 +3341,7 @@ function Expenses({
                                   {mxn(p.total)}
                                 </div>
                                 <button
-                                  onClick={() => togglePaid(p.__payKey)}
+                                  onClick={() => togglePaid(p.__payKey, p)}
                                   style={{
                                     background: paid ? C.green : "transparent",
                                     border: `2px solid ${paid ? C.green : C.border}`,
@@ -4240,6 +4260,35 @@ function Expenses({
             </Modal>
           );
         })()}
+
+      {/* MSI installment confirmation when marking a TDC payment as paid */}
+      <Modal open={!!msiConfirmPayment} onClose={() => setMsiConfirmPayment(null)} title="📦 Cuotas MSI incluidas">
+        <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>
+          Este pago incluye las siguientes cuotas MSI. ¿Quieres marcarlas como pagadas y avanzar la barra de progreso?
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
+          {(msiConfirmPayment?.items.filter((e) => e.msiPlanId) || []).map((e) => {
+            const plan = plans.find((pl) => pl.id === e.msiPlanId);
+            return (
+              <div key={e.id} style={{ background: C.elevated, borderRadius: 10, padding: "9px 12px", border: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: C.text }}>{e.description}</div>
+                  {plan && <div style={{ fontSize: 10, color: C.sub, marginTop: 2 }}>Pagado {plan.paidM}/{plan.totalM} cuotas</div>}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.orange }}>{mxn(e.amount)}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={() => setMsiConfirmPayment(null)} style={{ flex: 1, background: C.elevated, border: `1px solid ${C.border}`, borderRadius: 12, padding: "11px 0", color: C.sub, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+            No, solo marcar pagado
+          </button>
+          <button onClick={markMsiInstallmentsPaid} style={{ flex: 1, background: C.orange + "22", border: `1px solid ${C.orange}55`, borderRadius: 12, padding: "11px 0", color: C.orange, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+            Sí, actualizar MSI
+          </button>
+        </div>
+      </Modal>
 
       {/* PAY TDC MODAL */}
       <Modal
