@@ -1801,7 +1801,6 @@ function Dashboard({
   // ── Accordion open states ──
   const [openSections, setOpenSections] = useState({
     accounts: true,
-    chart: true,
     transfers: false,
     cats: false,
   });
@@ -1972,175 +1971,6 @@ function Dashboard({
             />
           ))}
         </div>
-      </SectionBody>
-
-      {/* GASTO MENSUAL */}
-      <SectionHead
-        label="📊 Gasto Mensual"
-        isOpen={openSections.chart}
-        onToggle={() => toggle("chart")}
-        extra={mxn(monthTotal, true)}
-        color={C.orange}
-      />
-      <SectionBody isOpen={openSections.chart} color={C.orange}>
-        {/* Monthly bars */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-end",
-            gap: 6,
-            height: 72,
-          }}
-        >
-          {realMonthlyChart.map((m, i) => {
-            const h = maxBar > 0 ? (m.total / maxBar) * 100 : 0;
-            const last = i === realMonthlyChart.length - 1;
-            return (
-              <div
-                key={m.month}
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 2,
-                }}
-              >
-                <div style={{ fontSize: 9, color: C.sub, fontWeight: 700 }}>
-                  {m.total > 0 ? mxn(m.total, true) : ""}
-                </div>
-                <div
-                  style={{
-                    width: "100%",
-                    height: `${Math.max(h, m.total > 0 ? 4 : 0)}%`,
-                    background: last ? C.orange : "#2a2a50",
-                    borderRadius: "3px 3px 0 0",
-                    minHeight: m.total > 0 ? 4 : 0,
-                  }}
-                />
-                <div
-                  style={{
-                    fontSize: 9,
-                    color: last ? C.orange : C.muted,
-                    fontWeight: 700,
-                  }}
-                >
-                  {m.month}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {/* Category breakdown */}
-        {catBreakdown.filter((c) => c.spent > 0).length > 0 && (
-          <div
-            style={{
-              marginTop: 14,
-              borderTop: `1px solid ${C.border}`,
-              paddingTop: 12,
-              display: "flex",
-              flexDirection: "column",
-              gap: 9,
-            }}
-          >
-            {catBreakdown
-              .filter((c) => c.spent > 0)
-              .sort((a, b) => b.spent - a.spent)
-              .map((cat) => {
-                const pct =
-                  cat.budget > 0
-                    ? Math.min(100, (cat.spent / cat.budget) * 100)
-                    : null;
-                const overBudget = pct !== null && pct >= 100;
-                return (
-                  <div
-                    key={cat.id}
-                    style={{ display: "flex", alignItems: "center", gap: 8 }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 15,
-                        width: 20,
-                        textAlign: "center",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {cat.icon || "📦"}
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          marginBottom: pct !== null ? 4 : 0,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            color: C.text,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {cat.name}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 800,
-                            color: overBudget ? C.red : C.text,
-                            flexShrink: 0,
-                            marginLeft: 6,
-                          }}
-                        >
-                          {mxn(cat.spent)}
-                        </span>
-                      </div>
-                      {pct !== null && (
-                        <div
-                          style={{
-                            height: 4,
-                            background: C.border,
-                            borderRadius: 2,
-                            overflow: "hidden",
-                          }}
-                        >
-                          <div
-                            style={{
-                              height: "100%",
-                              width: `${pct}%`,
-                              background: overBudget
-                                ? C.red
-                                : cat.color || C.accent,
-                              borderRadius: 2,
-                              transition: "width .3s",
-                            }}
-                          />
-                        </div>
-                      )}
-                    </div>
-                    {pct !== null && (
-                      <span
-                        style={{
-                          fontSize: 10,
-                          color: overBudget ? C.red : C.sub,
-                          fontWeight: 700,
-                          width: 30,
-                          textAlign: "right",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {Math.round(pct)}%
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-          </div>
-        )}
       </SectionBody>
 
       {/* TRANSFERENCIAS RECIBIDAS */}
@@ -7030,6 +6860,129 @@ function Sidebar({ tab, setTab, userName, onLogout }) {
   );
 }
 
+// ─── SPENDING MODAL ───────────────────────────────────────────────────────────
+const fmtMonthKey = (mk) => {
+  const [y, m] = mk.split("-");
+  return new Date(+y, +m - 1, 1).toLocaleDateString("es-MX", { month: "long", year: "numeric" });
+};
+
+function SpendingModal({ expenses, categories, onClose }) {
+  const months = useMemo(() => {
+    const seen = new Set();
+    expenses.forEach((e) => { if (!e.isMSIInstallment) seen.add(e.date.slice(0, 7)); });
+    return [...seen].sort((a, b) => b.localeCompare(a));
+  }, [expenses]);
+
+  const [selectedMonth, setSelectedMonth] = useState(() => getCurrentMonth());
+
+  const breakdown = useMemo(() => {
+    return categories
+      .map((cat) => ({
+        ...cat,
+        spent: expenses
+          .filter((e) => !e.isMSIInstallment && e.date.startsWith(selectedMonth) && e.categoryId === cat.id)
+          .reduce((s, e) => s + e.amount, 0),
+      }))
+      .filter((c) => c.spent > 0)
+      .sort((a, b) => b.spent - a.spent);
+  }, [expenses, categories, selectedMonth]);
+
+  const total = breakdown.reduce((s, c) => s + c.spent, 0);
+
+  // SVG donut chart
+  const R = 52, stroke = 22;
+  const circ = 2 * Math.PI * R;
+  let acc = 0;
+  const segments = breakdown.map((cat) => {
+    const len = (cat.spent / total) * circ;
+    const dashOffset = circ - acc;
+    acc += len;
+    return { ...cat, len, dashOffset };
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Gasto Mensual">
+      {/* Month selector */}
+      <select
+        value={selectedMonth}
+        onChange={(e) => setSelectedMonth(e.target.value)}
+        style={{
+          width: "100%", background: C.elevated, border: `1px solid ${C.border}`,
+          borderRadius: 10, padding: "10px 12px", color: C.text, fontSize: 14,
+          marginBottom: 20, cursor: "pointer", fontFamily: "inherit",
+        }}
+      >
+        {months.map((m) => (
+          <option key={m} value={m} style={{ background: C.elevated }}>
+            {fmtMonthKey(m)}
+          </option>
+        ))}
+      </select>
+
+      {total > 0 ? (
+        <>
+          {/* Donut chart */}
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+            <svg width="180" height="180" viewBox="0 0 180 180">
+              <g transform="rotate(-90 90 90)">
+                {segments.map((seg) => (
+                  <circle
+                    key={seg.id}
+                    cx="90" cy="90" r={R}
+                    fill="none"
+                    stroke={seg.color || C.accent}
+                    strokeWidth={stroke}
+                    strokeDasharray={`${seg.len} ${circ - seg.len}`}
+                    strokeDashoffset={seg.dashOffset}
+                    strokeLinecap="butt"
+                  />
+                ))}
+              </g>
+              {/* Center label */}
+              <text x="90" y="84" textAnchor="middle" fill={C.text} fontSize="15" fontWeight="900" fontFamily="-apple-system,sans-serif">
+                {mxn(total, true)}
+              </text>
+              <text x="90" y="101" textAnchor="middle" fill={C.sub} fontSize="10" fontFamily="-apple-system,sans-serif">
+                total del mes
+              </text>
+            </svg>
+          </div>
+
+          {/* Category list */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {breakdown.map((cat) => {
+              const pct = Math.round((cat.spent / total) * 100);
+              return (
+                <div key={cat.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{
+                    width: 10, height: 10, borderRadius: "50%",
+                    background: cat.color || C.accent, flexShrink: 0,
+                  }} />
+                  <span style={{ fontSize: 15, flexShrink: 0 }}>{cat.icon || "📦"}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{cat.name}</span>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: C.text, marginLeft: 8 }}>{mxn(cat.spent)}</span>
+                    </div>
+                    <div style={{ height: 4, background: C.border, borderRadius: 2, marginTop: 4, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${pct}%`, background: cat.color || C.accent, borderRadius: 2, transition: "width .3s" }} />
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: C.sub, width: 30, textAlign: "right", flexShrink: 0 }}>{pct}%</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <div style={{ textAlign: "center", padding: "32px 0", color: C.muted, fontSize: 13 }}>
+          Sin gastos este mes
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 // ─── AUTH SCREENS ─────────────────────────────────────────────────────────────
 function AuthScreen({ onLogin }) {
   const [mode, setMode] = useState("login");
@@ -7283,6 +7236,7 @@ export default function App() {
   const [transfers, setTransfers] = useState([]);
   const [goalWithdrawals, setGoalWithdrawals] = useState([]);
   const [dataLoading, setDataLoading] = useState(false);
+  const [showSpendingModal, setShowSpendingModal] = useState(false);
 
   useEffect(() => {
     sb.auth.getSession().then(({ data: { session } }) => {
@@ -7638,26 +7592,39 @@ export default function App() {
       <div
         style={{
           display: "flex",
-          justifyContent: "flex-end",
+          justifyContent: "space-between",
+          alignItems: "center",
           padding: "6px 16px 0",
           background: C.bg,
         }}
       >
         <button
+          onClick={() => setShowSpendingModal(true)}
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 20, padding: "3px 4px", lineHeight: 1,
+          }}
+          title="Gasto Mensual"
+        >
+          📊
+        </button>
+        <button
           onClick={handleLogout}
           style={{
-            background: "none",
-            border: "none",
-            color: C.sub,
-            fontSize: 11,
-            cursor: "pointer",
-            padding: "3px 8px",
-            fontFamily: "inherit",
+            background: "none", border: "none", color: C.sub,
+            fontSize: 11, cursor: "pointer", padding: "3px 8px", fontFamily: "inherit",
           }}
         >
           Cerrar sesión →
         </button>
       </div>
+      {showSpendingModal && (
+        <SpendingModal
+          expenses={expenses}
+          categories={categories}
+          onClose={() => setShowSpendingModal(false)}
+        />
+      )}
       <div
         style={{
           paddingBottom: "calc(85px + env(safe-area-inset-bottom, 0px))",
