@@ -2012,7 +2012,7 @@ function Dashboard({
         return (
           <>
             <SectionHead
-              label="📥 Transferencias Recibidas"
+              label="↕️ Transferencias"
               isOpen={openSections.transfers}
               onToggle={() => toggle("transfers")}
               count={totalCount}
@@ -2091,6 +2091,7 @@ function Dashboard({
                   })}
                   {visTransfers.slice(0, 8).map((t) => {
                     const acc = accounts.find((a) => a.id === t.accountId);
+                    const isSent = t.type === "sent";
                     return (
                       <div
                         key={t.id}
@@ -2102,17 +2103,18 @@ function Dashboard({
                           borderBottom: `1px solid ${C.border}`,
                         }}
                       >
-                        <span style={{ fontSize: 18 }}>📥</span>
+                        <span style={{ fontSize: 18 }}>{isSent ? "📤" : "📥"}</span>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
-                            De: <span style={{ color: C.green }}>{t.counterparty}</span>
+                            {isSent ? "A: " : "De: "}
+                            <span style={{ color: isSent ? C.red : C.green }}>{t.counterparty}</span>
                           </div>
                           <div style={{ display: "flex", gap: 5, marginTop: 2 }}>
                             {acc && <Tag color={acc.color}>{acc.name}</Tag>}
                             <span style={{ fontSize: 10, color: C.muted }}>{fmtDateShort(t.date)}</span>
                           </div>
                         </div>
-                        <span style={{ fontSize: 13, fontWeight: 900, color: C.green }}>+{mxn(t.amount)}</span>
+                        <span style={{ fontSize: 13, fontWeight: 900, color: isSent ? C.red : C.green }}>{isSent ? "−" : "+"}{mxn(t.amount)}</span>
                         <button onClick={() => { setTransForm({ type: t.type, amount: String(t.amount), accountId: t.accountId, counterparty: t.counterparty, date: t.date, notes: t.notes || "" }); setEditingTrans(t); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: C.sub, padding: "2px 4px" }}>✏️</button>
                         <button onClick={() => deleteTrans(t)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: C.red, padding: "2px 4px" }}>🗑</button>
                       </div>
