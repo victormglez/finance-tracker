@@ -1840,6 +1840,14 @@ function Dashboard({
   const toggle = (k) => setOpenSections((s) => ({ ...s, [k]: !s[k] }));
 
   // ── Handlers ──
+  // Delta = how much to change the account balance for a transfer.
+  // Debit:  received → +amt (money comes in),  sent → -amt (money goes out)
+  // Credit: received → -amt (refund reduces debt), sent → +amt (charge increases debt)
+  const transDelta = (acc, isReceived, amount) =>
+    acc.type === "credit"
+      ? (isReceived ? -amount : amount)
+      : (isReceived ? amount : -amount);
+
   const saveTrans = async () => {
     if (!transForm.amount || !transForm.counterparty.trim()) return;
     const amt = parseFloat(transForm.amount);
@@ -1860,7 +1868,7 @@ function Dashboard({
     if (acc)
       await sb
         .from("accounts")
-        .update({ balance: acc.balance + (isRec ? amt : -amt) })
+        .update({ balance: acc.balance + transDelta(acc, isRec, amt) })
         .eq("id", acc.id);
     setTransForm(emptyTransForm);
     setShowAddTrans(false);
@@ -1882,14 +1890,16 @@ function Dashboard({
     }).eq("id", orig.id);
     const isRec = orig.type === "received";
     if (origAcc?.id === newAcc?.id) {
-      // Same account: reverse old + apply new in one step to avoid stale-state overwrite
+      // Same account: undo old + apply new in one step to avoid stale-state overwrite
       if (origAcc)
-        await sb.from("accounts").update({ balance: origAcc.balance + (isRec ? -orig.amount + amt : orig.amount - amt) }).eq("id", origAcc.id);
+        await sb.from("accounts").update({
+          balance: origAcc.balance - transDelta(origAcc, isRec, orig.amount) + transDelta(origAcc, isRec, amt),
+        }).eq("id", origAcc.id);
     } else {
       if (origAcc)
-        await sb.from("accounts").update({ balance: origAcc.balance + (isRec ? -orig.amount : orig.amount) }).eq("id", origAcc.id);
+        await sb.from("accounts").update({ balance: origAcc.balance - transDelta(origAcc, isRec, orig.amount) }).eq("id", origAcc.id);
       if (newAcc)
-        await sb.from("accounts").update({ balance: newAcc.balance + (isRec ? amt : -amt) }).eq("id", newAcc.id);
+        await sb.from("accounts").update({ balance: newAcc.balance + transDelta(newAcc, isRec, amt) }).eq("id", newAcc.id);
     }
     setEditingTrans(null);
     if (reloadAll) await reloadAll();
@@ -1899,7 +1909,7 @@ function Dashboard({
     await sb.from("transfers").delete().eq("id", t.id);
     const acc = accounts.find((a) => a.id === t.accountId);
     if (acc)
-      await sb.from("accounts").update({ balance: acc.balance + (t.type === "received" ? -t.amount : t.amount) }).eq("id", acc.id);
+      await sb.from("accounts").update({ balance: acc.balance - transDelta(acc, t.type === "received", t.amount) }).eq("id", acc.id);
     if (reloadAll) await reloadAll();
   };
   const saveCat = async () => {
