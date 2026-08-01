@@ -2740,6 +2740,8 @@ function Expenses({
   categories,
   goals,
   setGoals,
+  transfers,
+  goalWithdrawals,
   session,
   reloadAll,
 }) {
@@ -3101,6 +3103,12 @@ function Expenses({
           const paymentsDue = allEntries.filter((e) => e.__isPaymentDue);
 
           const monthTotal = realExpenses.reduce((s, e) => s + e.amount, 0);
+          const monthIncome = (transfers || [])
+            .filter((t) => t.type === "received" && !t.counterparty?.startsWith("__goal__") && t.date.startsWith(mk))
+            .reduce((s, t) => s + t.amount, 0)
+            + (goalWithdrawals || [])
+            .filter((w) => w.date.startsWith(mk))
+            .reduce((s, w) => s + w.amount, 0);
 
           // Group real expenses by date
           const byDate = {};
@@ -3210,8 +3218,13 @@ function Expenses({
                   </div>
                 </div>
                 <div style={{ textAlign: "right", marginRight: 4 }}>
+                  {monthIncome > 0 && (
+                    <div style={{ fontSize: 11, fontWeight: 700, color: C.green }}>
+                      ↑ {mxn(monthIncome)}
+                    </div>
+                  )}
                   <div style={{ fontSize: 15, fontWeight: 800, color: C.red }}>
-                    {mxn(monthTotal)}
+                    ↓ {mxn(monthTotal)}
                   </div>
                 </div>
                 <div
@@ -7637,6 +7650,8 @@ export default function App() {
           categories={categories}
           goals={goals}
           setGoals={setGoals}
+          transfers={transfers}
+          goalWithdrawals={goalWithdrawals}
           session={session}
           reloadAll={loadAll}
         />
