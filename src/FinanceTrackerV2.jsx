@@ -2759,6 +2759,36 @@ function Expenses({
     }
   });
   const [msiConfirmPayment, setMsiConfirmPayment] = useState(null);
+  const [payAmountOverrides, setPayAmountOverrides] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("payAmountOverrides") || "{}"); }
+    catch { return {}; }
+  });
+  const [editingPayAmount, setEditingPayAmount] = useState(null);
+  const [editPayAmountVal, setEditPayAmountVal] = useState("");
+  const savePayAmountOverride = async (payKey, val, autoTotal, accountId) => {
+    const num = parseFloat(val);
+    const newOverride = (!isNaN(num) && num > 0 && Math.abs(num - autoTotal) > 0.001) ? num : null;
+    const prevOverride = payAmountOverrides[payKey] ?? null;
+    // How much did the debt change relative to what expenses already track?
+    const prevExtra = prevOverride != null ? prevOverride - autoTotal : 0;
+    const newExtra  = newOverride  != null ? newOverride  - autoTotal : 0;
+    const balanceDelta = newExtra - prevExtra;
+    setPayAmountOverrides((prev) => {
+      const next = { ...prev };
+      if (newOverride != null) next[payKey] = newOverride;
+      else delete next[payKey];
+      localStorage.setItem("payAmountOverrides", JSON.stringify(next));
+      return next;
+    });
+    if (balanceDelta !== 0 && accountId) {
+      const acc = accounts.find((a) => a.id === accountId);
+      if (acc) {
+        await sb.from("accounts").update({ balance: acc.balance + balanceDelta }).eq("id", acc.id);
+        if (reloadAll) await reloadAll();
+      }
+    }
+    setEditingPayAmount(null);
+  };
   const togglePaid = (payKey, payment) => {
     setPaidPayments((prev) => {
       const next = new Set(prev);
@@ -3387,22 +3417,33 @@ function Expenses({
                                   gap: 6,
                                 }}
                               >
-                                <div
-                                  style={{
-                                    fontSize: 15,
-                                    fontWeight: 900,
-                                    color: paid
-                                      ? C.green
-                                      : overdue
-                                        ? C.red
-                                        : C.text,
-                                    textDecoration: paid
-                                      ? "line-through"
-                                      : "none",
-                                  }}
-                                >
-                                  {mxn(p.total)}
-                                </div>
+                                {editingPayAmount === p.__payKey ? (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                    <input
+                                      type="number"
+                                      value={editPayAmountVal}
+                                      onChange={(e) => setEditPayAmountVal(e.target.value)}
+                                      autoFocus
+                                      style={{ width: 90, fontSize: 13, fontWeight: 700, background: C.bg, border: `1.5px solid ${cardColor}`, borderRadius: 7, padding: "4px 6px", color: C.text, textAlign: "right", fontFamily: "inherit" }}
+                                    />
+                                    <button onClick={() => savePayAmountOverride(p.__payKey, editPayAmountVal, p.total, p.accountId)} style={{ background: C.green, border: "none", borderRadius: 6, width: 26, height: 26, cursor: "pointer", color: "#fff", fontSize: 13, fontWeight: 900 }}>✓</button>
+                                    <button onClick={() => setEditingPayAmount(null)} style={{ background: C.elevated, border: `1px solid ${C.border}`, borderRadius: 6, width: 26, height: 26, cursor: "pointer", color: C.sub, fontSize: 13 }}>✕</button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                    <div style={{ textAlign: "right" }}>
+                                      <div style={{ fontSize: 15, fontWeight: 900, color: paid ? C.green : overdue ? C.red : C.text, textDecoration: paid ? "line-through" : "none" }}>
+                                        {mxn(payAmountOverrides[p.__payKey] ?? p.total)}
+                                      </div>
+                                      {payAmountOverrides[p.__payKey] != null && (
+                                        <div style={{ fontSize: 9, color: C.muted }}>Auto: {mxn(p.total)}</div>
+                                      )}
+                                    </div>
+                                    {!paid && (
+                                      <button onClick={() => { setEditPayAmountVal(String(payAmountOverrides[p.__payKey] ?? p.total)); setEditingPayAmount(p.__payKey); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: C.sub, padding: "2px", lineHeight: 1 }}>✏️</button>
+                                    )}
+                                  </div>
+                                )}
                                 <button
                                   onClick={() => togglePaid(p.__payKey, p)}
                                   style={{
