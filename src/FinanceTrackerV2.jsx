@@ -2032,7 +2032,14 @@ function Dashboard({
         <div
           style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
         >
-          {accounts.map((acc) => (
+          {[...accounts].sort((a, b) => {
+            const order = ["nómina", "bbva", "likeu", "nu", "amex"];
+            const ia = order.findIndex((n) => a.name.toLowerCase().includes(n));
+            const ib = order.findIndex((n) => b.name.toLowerCase().includes(n));
+            const wa = ia === -1 ? (a.type === "debit" ? -1 : 99) : ia;
+            const wb = ib === -1 ? (b.type === "debit" ? -1 : 99) : ib;
+            return wa - wb;
+          }).map((acc) => (
             <AccountCard
               key={acc.id}
               acc={acc}
@@ -2759,6 +2766,16 @@ function Expenses({
     }
   });
   const [msiConfirmPayment, setMsiConfirmPayment] = useState(null);
+  const [showCardDetail, setShowCardDetail] = useState(null); // holds `p` payment object
+  const deleteExpenseFromCard = async (exp) => {
+    if (!window.confirm(`¿Eliminar "${exp.description}"?`)) return;
+    await sb.from("expenses").delete().eq("id", exp.id);
+    const acc = accounts.find((a) => a.id === exp.accountId);
+    // Credit card: removing an expense reduces debt
+    if (acc) await sb.from("accounts").update({ balance: acc.balance - exp.amount }).eq("id", acc.id);
+    setShowCardDetail(null);
+    if (reloadAll) await reloadAll();
+  };
   const [payAmountOverrides, setPayAmountOverrides] = useState(() => {
     try { return JSON.parse(localStorage.getItem("payAmountOverrides") || "{}"); }
     catch { return {}; }
@@ -2845,21 +2862,24 @@ function Expenses({
       if (!map[mk]) map[mk] = [];
       map[mk].push(exp);
     });
-    // Also inject a "payment due" virtual entry for each credit card payment
-    // grouped by (accountId + paymentDate) — keyed into the month of the paymentDate
+    // Inject "payment due" virtual entries — one per account per month (merge all billing cycles)
     const payGroups = {};
     expenses.forEach((exp) => {
       if (!exp.paymentDate) return;
       const mk = exp.paymentDate.slice(0, 7);
-      const key = mk + "|" + exp.accountId + "|" + exp.paymentDate;
+      // Key by account only (not paymentDate) so multiple billing cycles for the same card merge
+      const key = mk + "|" + exp.accountId;
       if (!payGroups[key])
         payGroups[key] = {
           mk,
           accountId: exp.accountId,
-          paymentDate: exp.paymentDate,
+          paymentDate: exp.paymentDate, // will keep the earliest
           total: 0,
           items: [],
         };
+      // Keep earliest payment date across all billing cycles of this card
+      if (exp.paymentDate < payGroups[key].paymentDate)
+        payGroups[key].paymentDate = exp.paymentDate;
       payGroups[key].total += exp.amount;
       payGroups[key].items.push(exp);
     });
@@ -2875,14 +2895,12 @@ function Expenses({
     // Merge payment groups into their respective months as a special entry
     Object.values(payGroups).forEach((pg) => {
       if (!map[pg.mk]) map[pg.mk] = [];
-      // mark as a payment-due entry so we can render it differently
-      const alreadyHas = map[pg.mk].some(
-        (e) => e.__payKey === pg.paymentDate + "|" + pg.accountId,
-      );
+      const __payKey = pg.mk + "|" + pg.accountId;
+      const alreadyHas = map[pg.mk].some((e) => e.__payKey === __payKey);
       if (!alreadyHas) {
         map[pg.mk].push({
           __isPaymentDue: true,
-          __payKey: pg.paymentDate + "|" + pg.accountId,
+          __payKey,
           accountId: pg.accountId,
           paymentDate: pg.paymentDate,
           total: pg.total,
@@ -3314,6 +3332,7 @@ function Expenses({
                         return (
                           <div
                             key={p.__payKey}
+                            onClick={() => setShowCardDetail(p)}
                             style={{
                               borderRadius: 14,
                               marginBottom: 8,
@@ -3324,6 +3343,7 @@ function Expenses({
                                 : overdue
                                   ? C.redDim
                                   : C.elevated,
+                              cursor: "pointer",
                             }}
                           >
                             {/* Card color bar */}
@@ -3426,8 +3446,8 @@ function Expenses({
                                       autoFocus
                                       style={{ width: 90, fontSize: 13, fontWeight: 700, background: C.bg, border: `1.5px solid ${cardColor}`, borderRadius: 7, padding: "4px 6px", color: C.text, textAlign: "right", fontFamily: "inherit" }}
                                     />
-                                    <button onClick={() => savePayAmountOverride(p.__payKey, editPayAmountVal, p.total, p.accountId)} style={{ background: C.green, border: "none", borderRadius: 6, width: 26, height: 26, cursor: "pointer", color: "#fff", fontSize: 13, fontWeight: 900 }}>✓</button>
-                                    <button onClick={() => setEditingPayAmount(null)} style={{ background: C.elevated, border: `1px solid ${C.border}`, borderRadius: 6, width: 26, height: 26, cursor: "pointer", color: C.sub, fontSize: 13 }}>✕</button>
+                                    <button onClick={(e) => { e.stopPropagation(); savePayAmountOverride(p.__payKey, editPayAmountVal, p.total, p.accountId); }} style={{ background: C.green, border: "none", borderRadius: 6, width: 26, height: 26, cursor: "pointer", color: "#fff", fontSize: 13, fontWeight: 900 }}>✓</button>
+                                    <button onClick={(e) => { e.stopPropagation(); setEditingPayAmount(null); }} style={{ background: C.elevated, border: `1px solid ${C.border}`, borderRadius: 6, width: 26, height: 26, cursor: "pointer", color: C.sub, fontSize: 13 }}>✕</button>
                                   </div>
                                 ) : (
                                   <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -3440,12 +3460,12 @@ function Expenses({
                                       )}
                                     </div>
                                     {!paid && (
-                                      <button onClick={() => { setEditPayAmountVal(String(payAmountOverrides[p.__payKey] ?? p.total)); setEditingPayAmount(p.__payKey); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: C.sub, padding: "2px", lineHeight: 1 }}>✏️</button>
+                                      <button onClick={(e) => { e.stopPropagation(); setEditPayAmountVal(String(payAmountOverrides[p.__payKey] ?? p.total)); setEditingPayAmount(p.__payKey); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: C.sub, padding: "2px", lineHeight: 1 }}>✏️</button>
                                     )}
                                   </div>
                                 )}
                                 <button
-                                  onClick={() => togglePaid(p.__payKey, p)}
+                                  onClick={(e) => { e.stopPropagation(); togglePaid(p.__payKey, p); }}
                                   style={{
                                     background: paid ? C.green : "transparent",
                                     border: `2px solid ${paid ? C.green : C.border}`,
@@ -4364,6 +4384,45 @@ function Expenses({
             </Modal>
           );
         })()}
+
+      {/* Card detail popup — all expenses for this payment group */}
+      {showCardDetail && (() => {
+        const p = showCardDetail;
+        const acc = accounts.find((a) => a.id === p.accountId);
+        const cardColor = acc?.color || C.accent;
+        const sortedItems = [...p.items].sort((a, b) => b.date.localeCompare(a.date));
+        return (
+          <Modal open={true} onClose={() => setShowCardDetail(null)} title={`💳 ${acc?.name || "Tarjeta"} · Cargos`}>
+            <div style={{ fontSize: 11, color: C.sub, marginBottom: 12 }}>
+              {p.items.length} cargo{p.items.length !== 1 ? "s" : ""} · Total {mxn(payAmountOverrides[p.__payKey] ?? p.total)}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
+              {sortedItems.map((exp) => {
+                const cat = categories.find((c) => c.id === exp.categoryId);
+                return (
+                  <div key={exp.id} style={{ display: "flex", alignItems: "center", gap: 10, background: C.elevated, borderRadius: 11, padding: "10px 12px", border: `1px solid ${C.border}` }}>
+                    <span style={{ fontSize: 20, flexShrink: 0 }}>{cat?.icon || "🧾"}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{exp.description}</div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 2, alignItems: "center" }}>
+                        {cat && <Tag color={cat.color}>{cat.name}</Tag>}
+                        <span style={{ fontSize: 10, color: C.muted }}>{fmtDateShort(exp.date)}</span>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: cardColor }}>{mxn(exp.amount)}</div>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteExpenseFromCard(exp); }}
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: C.red, padding: "2px 4px", flexShrink: 0 }}
+                    >🗑</button>
+                  </div>
+                );
+              })}
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* MSI installment confirmation when marking a TDC payment as paid */}
       <Modal open={!!msiConfirmPayment} onClose={() => setMsiConfirmPayment(null)} title="📦 Cuotas MSI incluidas">
