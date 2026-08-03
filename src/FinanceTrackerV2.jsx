@@ -2776,25 +2776,49 @@ function Expenses({
     setShowCardDetail(null);
     if (reloadAll) await reloadAll();
   };
-  const [payAmountOverrides, setPayAmountOverrides] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("payAmountOverrides") || "{}"); }
-    catch { return {}; }
-  });
+  const [payAmountOverrides, setPayAmountOverrides] = useState({});
   const [editingPayAmount, setEditingPayAmount] = useState(null);
   const [editPayAmountVal, setEditPayAmountVal] = useState("");
+
+  // Load overrides from Supabase on mount
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    sb.from("tdc_overrides")
+      .select("account_id, month_key, amount")
+      .eq("user_id", session.user.id)
+      .then(({ data }) => {
+        if (data) {
+          const map = {};
+          data.forEach((r) => { map[r.month_key + "|" + r.account_id] = Number(r.amount); });
+          setPayAmountOverrides(map);
+        }
+      });
+  }, [session]);
+
   const savePayAmountOverride = async (payKey, val, autoTotal, accountId) => {
+    const mk = payKey.split("|")[0];
     const num = parseFloat(val);
     const newOverride = (!isNaN(num) && num > 0 && Math.abs(num - autoTotal) > 0.001) ? num : null;
     const prevOverride = payAmountOverrides[payKey] ?? null;
-    // How much did the debt change relative to what expenses already track?
     const prevExtra = prevOverride != null ? prevOverride - autoTotal : 0;
     const newExtra  = newOverride  != null ? newOverride  - autoTotal : 0;
     const balanceDelta = newExtra - prevExtra;
+    // Persist to Supabase
+    if (newOverride != null) {
+      await sb.from("tdc_overrides").upsert(
+        { user_id: session?.user?.id, account_id: accountId, month_key: mk, amount: newOverride },
+        { onConflict: "user_id,account_id,month_key" }
+      );
+    } else {
+      await sb.from("tdc_overrides").delete()
+        .eq("user_id", session?.user?.id)
+        .eq("account_id", accountId)
+        .eq("month_key", mk);
+    }
     setPayAmountOverrides((prev) => {
       const next = { ...prev };
       if (newOverride != null) next[payKey] = newOverride;
       else delete next[payKey];
-      localStorage.setItem("payAmountOverrides", JSON.stringify(next));
       return next;
     });
     if (balanceDelta !== 0 && accountId) {
