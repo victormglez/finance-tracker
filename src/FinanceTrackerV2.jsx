@@ -3214,12 +3214,8 @@ function Expenses({
             b.localeCompare(a),
           );
 
-          // Show ALL payments once the earliest one is due
-          const earliestDueDate = paymentsDue.length > 0
-            ? paymentsDue.reduce((min,p)=>p.paymentDate<min?p.paymentDate:min, paymentsDue[0].paymentDate)
-            : null;
-          const anyPaymentDue = earliestDueDate ? daysUntil(earliestDueDate)<=0 : false;
-          const visiblePayments = anyPaymentDue ? paymentsDue : [];
+          // Always show card payment totals so they can be paid a few days ahead of the due date
+          const visiblePayments = paymentsDue;
 
           const headerCount =
             realExpenses.length + (visiblePayments.length > 0 ? 1 : 0);
@@ -3293,20 +3289,6 @@ function Expenses({
                       >
                         💳 {visiblePayments.length} pago
                         {visiblePayments.length !== 1 ? "s" : ""} TDC
-                      </span>
-                    )}
-                    {!anyPaymentDue && paymentsDue.length > 0 && (
-                      <span
-                        style={{
-                          fontSize: 9,
-                          background: C.blue + "22",
-                          color: C.blue,
-                          padding: "1px 5px",
-                          borderRadius: 4,
-                          fontWeight: 700,
-                        }}
-                      >
-                        🔒 {paymentsDue.length} pendiente{paymentsDue.length !== 1 ? "s" : ""}
                       </span>
                     )}
                   </div>
