@@ -4064,6 +4064,10 @@ function Expenses({
             if (isNaN(newAmt) || newAmt <= 0) return;
             const oldAcc = accounts.find((a) => a.id === exp.accountId);
             const newAcc = accounts.find((a) => a.id === expenseEdit.accountId);
+            const newPd =
+              !exp.isMSI && newAcc?.type === "credit" && newAcc.cutDay && newAcc.payDay
+                ? calcPaymentDate(expenseEdit.date, newAcc.cutDay, newAcc.payDay)
+                : null;
             await sb
               .from("expenses")
               .update({
@@ -4072,6 +4076,7 @@ function Expenses({
                 date: expenseEdit.date,
                 category_id: expenseEdit.categoryId || null,
                 account_id: expenseEdit.accountId || null,
+                payment_date: newPd,
               })
               .eq("id", exp.id);
             if (oldAcc?.id === newAcc?.id) {
