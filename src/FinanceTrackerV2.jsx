@@ -4740,6 +4740,12 @@ function Subscriptions({
     .reduce((s, sub) => s + sub.amount, 0);
   const currentMonth = getCurrentMonth();
 
+  const sortedSubs = [...subs].sort(
+    (a, b) =>
+      daysUntil(nextOccurrence(a.chargeDay)) -
+      daysUntil(nextOccurrence(b.chargeDay)),
+  );
+
   const chargeThisMonth = (sub) => {
     const chargeDate = `${currentMonth}-${String(sub.chargeDay).padStart(2, "0")}`;
     return !expenses.some(
@@ -5059,7 +5065,7 @@ function Subscriptions({
         ))}
       </div>
       <div style={{ padding: "0 20px" }}>
-        {subs.map((sub) => (
+        {sortedSubs.map((sub) => (
           <SubRow key={sub.id} sub={sub} />
         ))}
         {subs.length === 0 && (
