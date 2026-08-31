@@ -3328,7 +3328,12 @@ function Expenses({
                   }}
                 >
                   {/* Payment-due rows — one card per credit card */}
-                  {visiblePayments.length > 0 && (
+                  {visiblePayments.length > 0 && (() => {
+                    const paymentsTotal = visiblePayments.reduce(
+                      (s, p) => s + (payAmountOverrides[p.__payKey] ?? p.total),
+                      0,
+                    );
+                    return (
                     <div style={{ marginBottom: 4 }}>
                       <button
                         onClick={() => togglePayments(mk)}
@@ -3344,6 +3349,9 @@ function Expenses({
                           textTransform: "uppercase", letterSpacing: 1, flex: 1, textAlign: "left",
                         }}>
                           💳 Pagos de Tarjeta
+                        </div>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: C.red }}>
+                          {mxn(paymentsTotal)}
                         </div>
                         <div style={{
                           fontSize: 11, color: C.red,
@@ -3525,7 +3533,8 @@ function Expenses({
                         );
                       })}
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Real expense rows grouped by date */}
                   {sortedDates.map((date) => {
