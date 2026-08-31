@@ -150,6 +150,19 @@ function getCurrentMonth() {
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`;
 }
 
+// Next month key, and whether we're within 2 days of month-end (so the
+// next month's section can be previewed a couple days early)
+function getNextMonth() {
+  const n = new Date();
+  const next = new Date(n.getFullYear(), n.getMonth() + 1, 1);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
+}
+function nearMonthEnd() {
+  const n = new Date();
+  const daysInMonth = new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate();
+  return daysInMonth - n.getDate() <= 1; // today is the last day or 2nd-to-last day
+}
+
 // ─── INITIAL DATA ─────────────────────────────────────────────────────────────
 const INIT_ACCOUNTS = [
   {
@@ -2916,6 +2929,11 @@ function Expenses({
         if (!map[mk]) map[mk] = [];
         // Don't duplicate if already recorded as expense
       });
+    // Make sure next month exists once we're close to month-end, even with no data yet
+    if (nearMonthEnd()) {
+      const nm = getNextMonth();
+      if (!map[nm]) map[nm] = [];
+    }
     // Merge payment groups into their respective months as a special entry
     Object.values(payGroups).forEach((pg) => {
       if (!map[pg.mk]) map[pg.mk] = [];
@@ -3093,8 +3111,12 @@ function Expenses({
     .filter((e) => e.date.startsWith(currentMonth) && !e.isMSIInstallment)
     .reduce((s, e) => s + e.amount, 0);
 
-  // Filter: only show current month and past — no future months
-  const visibleByMonth = byMonth.filter(([mk]) => mk <= currentMonth);
+  // Filter: current month and past, plus next month once we're 1-2 days from month-end
+  const nextMonth = getNextMonth();
+  const showNextMonth = nearMonthEnd();
+  const visibleByMonth = byMonth.filter(
+    ([mk]) => mk <= currentMonth || (showNextMonth && mk === nextMonth),
+  );
 
   return (
     <div style={{ paddingBottom: 80 }}>
