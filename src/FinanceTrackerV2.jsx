@@ -150,6 +150,27 @@ function getCurrentMonth() {
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`;
 }
 
+// A subscription and an MSI plan can end up tracking the same real-world
+// recurring payment independently (e.g. "PPR" as a subscription AND as an
+// MSI plan), silently double-charging the account each cycle. Cross-check
+// the two systems, by account + similar amount, before creating either one.
+function findConflictingRecurring({ amount, accountId, subs = [], plans = [], excludeSubId = null, excludePlanId = null }) {
+  const sameAmount = (a) => Math.abs(a - amount) <= 1;
+  const sub = subs.find(
+    (s) => s.id !== excludeSubId && s.active && s.accountId === accountId && sameAmount(s.amount),
+  );
+  if (sub) return { kind: "subscription", name: sub.name };
+  const plan = plans.find(
+    (p) =>
+      p.id !== excludePlanId &&
+      p.accountId === accountId &&
+      p.paidM < p.totalM &&
+      sameAmount(p.monthly),
+  );
+  if (plan) return { kind: "plan", name: plan.desc };
+  return null;
+}
+
 // Next month key, and whether we're within 2 days of month-end (so the
 // next month's section can be previewed a couple days early)
 function getNextMonth() {
@@ -4736,6 +4757,7 @@ function Subscriptions({
   expenses,
   setExpenses,
   categories,
+  plans,
   session,
   reloadAll,
 }) {
@@ -4828,9 +4850,24 @@ function Subscriptions({
 
   const save = async () => {
     if (!form.name.trim() || !form.amount) return;
+    const amt = parseFloat(form.amount);
+    const conflict = findConflictingRecurring({
+      amount: amt,
+      accountId: form.accountId,
+      subs,
+      plans,
+      excludeSubId: editingSub?.id ?? null,
+    });
+    if (
+      conflict?.kind === "plan" &&
+      !window.confirm(
+        `Ya tienes un plan MSI "${conflict.name}" con un pago mensual similar en esta cuenta. ¿Seguro que quieres crear también esta suscripción? Podría duplicar el cargo.`,
+      )
+    )
+      return;
     const data = {
       name: form.name.trim(),
-      amount: parseFloat(form.amount),
+      amount: amt,
       frequency: form.frequency,
       category_id: form.categoryId || null,
       account_id: form.accountId || null,
@@ -6230,7 +6267,7 @@ function PlanCard({ plan, accounts, onEdit }) {
   );
 }
 
-function MSI({ plans, setPlans, accounts, session, reloadAll }) {
+function MSI({ plans, setPlans, accounts, subs, session, reloadAll }) {
   const [showModal, setShowModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState(null);
   const [openActive, setOpenActive] = useState(true);
@@ -6308,6 +6345,21 @@ function MSI({ plans, setPlans, accounts, session, reloadAll }) {
       : calcPaidMonths(form.startDate, form.months);
     const totalM = parseInt(form.months) || 0;
     const monthly = Math.round((parseFloat(form.total) / totalM) * 100) / 100;
+    if (!editingPlan) {
+      const conflict = findConflictingRecurring({
+        amount: monthly,
+        accountId: form.accountId,
+        subs,
+        plans,
+      });
+      if (
+        conflict?.kind === "subscription" &&
+        !window.confirm(
+          `Ya tienes una suscripción "${conflict.name}" con un monto mensual similar en esta cuenta. ¿Seguro que quieres crear también este plan MSI? Podría duplicar el cargo.`,
+        )
+      )
+        return;
+    }
     const data = {
       description: form.desc.trim(),
       total_amount: parseFloat(form.total),
@@ -7809,6 +7861,7 @@ export default function App() {
           plans={plans}
           setPlans={setPlans}
           accounts={accounts}
+          subs={subs}
           session={session}
           reloadAll={loadAll}
         />
@@ -7832,6 +7885,7 @@ export default function App() {
           expenses={expenses}
           setExpenses={setExpenses}
           categories={categories}
+          plans={plans}
           session={session}
           reloadAll={loadAll}
         />
