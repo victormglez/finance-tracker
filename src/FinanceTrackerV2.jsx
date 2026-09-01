@@ -495,7 +495,9 @@ const mxn = (n, compact = false) => {
   return (n < 0 ? "-$" : "$") + formatted;
 };
 const utilColor = (p) => (p < 30 ? C.green : p < 60 ? C.orange : C.red);
-const utilPct = (b, l) => (l ? (Math.abs(b) / l) * 100 : 0);
+// A negative credit-card balance means the bank owes YOU (overpayment/refund) —
+// that's not "utilization", so it's floored at 0 rather than taking abs().
+const utilPct = (b, l) => (l && b > 0 ? (b / l) * 100 : 0);
 
 // ─── UI PRIMITIVES ─────────────────────────────────────────────────────────────
 function ProgressBar({ pct, color = C.accent, h = 6 }) {
@@ -873,7 +875,7 @@ function NumberStepper({ value, onChange, min = 0, max = 999 }) {
 }
 
 // ─── ACCOUNT CARD ─────────────────────────────────────────────────────────────
-function AccountCard({ acc, onClick }) {
+function AccountCard({ acc, onClick, onViewCharges }) {
   const pct = acc.type === "credit" ? utilPct(acc.balance, acc.limit) : null;
   const nextCut = acc.cutDay ? nextOccurrence(acc.cutDay) : null;
   const nextPay = acc.payDay ? nextOccurrence(acc.payDay) : null;
@@ -921,18 +923,56 @@ function AccountCard({ acc, onClick }) {
         >
           {acc.type === "debit" ? "Débito" : "Crédito"}
         </span>
+        {acc.type === "credit" && onViewCharges && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewCharges();
+            }}
+            title="Ver cargos"
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 13,
+              padding: "0 0 0 6px",
+              color: C.sub,
+              lineHeight: 1,
+            }}
+          >
+            🧾
+          </button>
+        )}
       </div>
-      <div
-        style={{
-          fontSize: 17,
-          fontWeight: 900,
-          color: acc.balance >= 0 ? C.text : C.red,
-          marginBottom: pct !== null ? 8 : 0,
-        }}
-      >
-        {acc.type === "credit" ? mxn(Math.abs(acc.balance)) : mxn(acc.balance)}
-      </div>
-      {pct !== null && (
+      {(() => {
+        const isCreditSurplus = acc.type === "credit" && acc.balance < 0;
+        return (
+          <div
+            style={{
+              fontSize: 17,
+              fontWeight: 900,
+              color: isCreditSurplus
+                ? C.green
+                : acc.balance >= 0
+                  ? C.text
+                  : C.red,
+              marginBottom: pct !== null || isCreditSurplus ? 8 : 0,
+            }}
+          >
+            {acc.type === "credit"
+              ? isCreditSurplus
+                ? `+${mxn(Math.abs(acc.balance))}`
+                : mxn(acc.balance)
+              : mxn(acc.balance)}
+          </div>
+        );
+      })()}
+      {acc.type === "credit" && acc.balance < 0 && (
+        <div style={{ fontSize: 10, fontWeight: 700, color: C.green }}>
+          💰 A tu favor
+        </div>
+      )}
+      {pct !== null && acc.balance >= 0 && (
         <>
           <ProgressBar pct={pct} color={utilColor(pct)} h={4} />
           <div
@@ -1774,6 +1814,45 @@ function Dashboard({
   // ── Accounts ──
   const [showAddAcc, setShowAddAcc] = useState(false);
   const [editingAcc, setEditingAcc] = useState(null);
+  const [viewingCardExpenses, setViewingCardExpenses] = useState(null); // holds acc
+  const [editingChargeId, setEditingChargeId] = useState(null);
+  const [editChargeVal, setEditChargeVal] = useState("");
+
+  const cardCharges = viewingCardExpenses
+    ? expenses
+        .filter((e) => e.accountId === viewingCardExpenses.id)
+        .sort((a, b) => b.date.localeCompare(a.date))
+    : [];
+
+  const deleteCharge = async (exp) => {
+    if (!window.confirm(`¿Eliminar "${exp.description}"?`)) return;
+    await sb.from("expenses").delete().eq("id", exp.id);
+    const acc = accounts.find((a) => a.id === exp.accountId);
+    if (acc)
+      await sb
+        .from("accounts")
+        .update({ balance: acc.balance - exp.amount })
+        .eq("id", acc.id);
+    if (reloadAll) await reloadAll();
+  };
+
+  const saveChargeAmount = async (exp) => {
+    const newAmt = parseFloat(editChargeVal);
+    if (isNaN(newAmt) || newAmt <= 0) {
+      setEditingChargeId(null);
+      return;
+    }
+    const delta = newAmt - exp.amount;
+    await sb.from("expenses").update({ amount: newAmt }).eq("id", exp.id);
+    const acc = accounts.find((a) => a.id === exp.accountId);
+    if (acc && delta !== 0)
+      await sb
+        .from("accounts")
+        .update({ balance: acc.balance + delta })
+        .eq("id", acc.id);
+    setEditingChargeId(null);
+    if (reloadAll) await reloadAll();
+  };
 
   // ── Transfers ──
   const [showAddTrans, setShowAddTrans] = useState(false);
@@ -2078,6 +2157,7 @@ function Dashboard({
               key={acc.id}
               acc={acc}
               onClick={() => setEditingAcc(acc)}
+              onViewCharges={() => setViewingCardExpenses(acc)}
             />
           ))}
         </div>
@@ -2333,6 +2413,197 @@ function Dashboard({
           setEditingAcc(null);
         }}
       />
+
+      <Modal
+        open={!!viewingCardExpenses}
+        onClose={() => {
+          setViewingCardExpenses(null);
+          setEditingChargeId(null);
+        }}
+        title={`💳 ${viewingCardExpenses?.name || "Tarjeta"} · Cargos`}
+      >
+        <div style={{ fontSize: 11, color: C.sub, marginBottom: 12 }}>
+          {cardCharges.length} cargo{cardCharges.length !== 1 ? "s" : ""} · Total{" "}
+          {mxn(cardCharges.reduce((s, e) => s + e.amount, 0))}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            marginBottom: 8,
+            maxHeight: 420,
+            overflowY: "auto",
+          }}
+        >
+          {cardCharges.map((exp) => {
+            const cat = categories.find((c) => c.id === exp.categoryId);
+            const editing = editingChargeId === exp.id;
+            return (
+              <div
+                key={exp.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  background: C.elevated,
+                  borderRadius: 11,
+                  padding: "10px 12px",
+                  border: `1px solid ${C.border}`,
+                }}
+              >
+                <span style={{ fontSize: 20, flexShrink: 0 }}>
+                  {cat?.icon || "🧾"}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: C.text,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {exp.description}
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 6,
+                      marginTop: 2,
+                      alignItems: "center",
+                    }}
+                  >
+                    {cat && <Tag color={cat.color}>{cat.name}</Tag>}
+                    <span style={{ fontSize: 10, color: C.muted }}>
+                      {fmtDateShort(exp.date)}
+                    </span>
+                    {exp.paymentDate && (
+                      <span style={{ fontSize: 10, color: C.blue }}>
+                        📅 {fmtDateShort(exp.paymentDate)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {editing ? (
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}
+                  >
+                    <input
+                      type="number"
+                      value={editChargeVal}
+                      onChange={(e) => setEditChargeVal(e.target.value)}
+                      autoFocus
+                      style={{
+                        width: 90,
+                        fontSize: 13,
+                        fontWeight: 700,
+                        background: C.bg,
+                        border: `1.5px solid ${viewingCardExpenses?.color || C.accent}`,
+                        borderRadius: 7,
+                        padding: "4px 6px",
+                        color: C.text,
+                        textAlign: "right",
+                        fontFamily: "inherit",
+                      }}
+                    />
+                    <button
+                      onClick={() => saveChargeAmount(exp)}
+                      style={{
+                        background: C.green,
+                        border: "none",
+                        borderRadius: 6,
+                        width: 26,
+                        height: 26,
+                        cursor: "pointer",
+                        color: "#fff",
+                        fontSize: 13,
+                        fontWeight: 900,
+                      }}
+                    >
+                      ✓
+                    </button>
+                    <button
+                      onClick={() => setEditingChargeId(null)}
+                      style={{
+                        background: C.card,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                        width: 26,
+                        height: 26,
+                        cursor: "pointer",
+                        color: C.sub,
+                        fontSize: 13,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 800,
+                          color: viewingCardExpenses?.color || C.accent,
+                        }}
+                      >
+                        {mxn(exp.amount)}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setEditChargeVal(String(exp.amount));
+                        setEditingChargeId(exp.id);
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        fontSize: 14,
+                        color: C.sub,
+                        padding: "2px 4px",
+                        flexShrink: 0,
+                      }}
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      onClick={() => deleteCharge(exp)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        fontSize: 16,
+                        color: C.red,
+                        padding: "2px 4px",
+                        flexShrink: 0,
+                      }}
+                    >
+                      🗑
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+          {cardCharges.length === 0 && (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "20px 0",
+                color: C.muted,
+                fontSize: 12,
+              }}
+            >
+              Sin cargos registrados
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <Modal
         open={showAddTrans}
@@ -4583,7 +4854,7 @@ function Expenses({
             const tdc = accounts.find((a) => a.id === payTDCForm.accountId);
             const nomina = accounts.find((a) => a.type === "debit");
             const amt = parseFloat(payTDCForm.amount);
-            const newTDC = tdc ? Math.max(0, tdc.balance - amt) : 0;
+            const newTDC = tdc ? tdc.balance - amt : 0;
             const newNomina = nomina ? nomina.balance - amt : 0;
             const insufficient = nomina && amt > nomina.balance;
             return (
@@ -4649,13 +4920,18 @@ function Expenses({
                       style={{
                         fontSize: 12,
                         fontWeight: 800,
-                        color: newTDC === 0 ? C.green : C.orange,
+                        color: newTDC <= 0 ? C.green : C.orange,
                       }}
                     >
-                      {mxn(Math.abs(newTDC))}
+                      {newTDC < 0 ? `+${mxn(Math.abs(newTDC))}` : mxn(newTDC)}
                     </span>
                   </div>
                 </div>
+                {newTDC < 0 && (
+                  <div style={{ fontSize: 10, color: C.green, marginBottom: 8 }}>
+                    💰 Quedará {mxn(Math.abs(newTDC))} a tu favor
+                  </div>
+                )}
                 {nomina && (
                   <div
                     style={{
@@ -4713,7 +4989,7 @@ function Expenses({
             // Update TDC balance
             await sb
               .from("accounts")
-              .update({ balance: Math.max(0, tdcAcc.balance - amt) })
+              .update({ balance: tdcAcc.balance - amt })
               .eq("id", tdcAcc.id);
             // Update Nómina balance
             if (nominaAcc)
