@@ -3296,9 +3296,12 @@ function Dashboard({
 }
 
 // ─── EXPENSE ROW ──────────────────────────────────────────────────────────────
-function ExpenseRow({ exp, accounts, categories, onClick }) {
+function ExpenseRow({ exp, accounts, categories, goals, onClick }) {
   const acc = accounts.find((a) => a.id === exp.accountId);
   const cat = categories.find((c) => c.id === exp.categoryId);
+  const linkedGoal = exp.linkedGoalId
+    ? goals?.find((g) => g.id === exp.linkedGoalId)
+    : null;
   const pd = exp.paymentDate;
   const d = pd ? daysUntil(pd) : null;
   const isMSI = exp.isMSIInstallment;
@@ -3384,6 +3387,11 @@ function ExpenseRow({ exp, accounts, categories, onClick }) {
           )}
           {!isTDC && !isMSI && cat && (
             <span style={{ fontSize: 10, color: C.sub }}>{cat.name}</span>
+          )}
+          {linkedGoal && (
+            <Tag color={linkedGoal.color}>
+              {linkedGoal.icon} {linkedGoal.name}
+            </Tag>
           )}
           {acc && <Tag color={acc.color}>{acc.name}</Tag>}
           {pd && !isMSI && !isTDC && (
@@ -4291,6 +4299,7 @@ function Expenses({
                               exp={exp}
                               accounts={accounts}
                               categories={categories}
+                              goals={goals}
                               onClick={() => setShowDetail(exp)}
                             />
                           ))}
