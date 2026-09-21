@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo, useCallback } from "react";
+﻿import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 // ─── SUPABASE ─────────────────────────────────────────────────────────────────
@@ -8321,6 +8321,7 @@ export default function App() {
   const [transfers, setTransfers] = useState([]);
   const [goalWithdrawals, setGoalWithdrawals] = useState([]);
   const [dataLoading, setDataLoading] = useState(false);
+  const hasLoadedOnce = useRef(false);
   const [showSpendingModal, setShowSpendingModal] = useState(false);
 
   useEffect(() => {
@@ -8339,7 +8340,11 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     if (!session) return;
-    setDataLoading(true);
+    // Only show the full-screen loader on the very first load — a background
+    // refresh (after paying a card, editing an expense, etc.) shouldn't
+    // unmount the current screen and wipe its local state (open accordions,
+    // in-progress edits, the async-loaded paid-cycle checkmarks).
+    if (!hasLoadedOnce.current) setDataLoading(true);
     const [accR, catR, expR, gR, msiR, subR, trR, gwR] = await Promise.all([
       sb.from("accounts").select("*").order("name"),
       sb.from("categories").select("*").order("name"),
@@ -8453,6 +8458,7 @@ export default function App() {
         concept: w.concept || null,
       })),
     );
+    hasLoadedOnce.current = true;
     setDataLoading(false);
   }, [session]);
 
@@ -8511,6 +8517,7 @@ export default function App() {
   };
   const handleLogout = async () => {
     await sb.auth.signOut();
+    hasLoadedOnce.current = false;
     setAccounts([]);
     setExpenses([]);
     setCategories([]);
