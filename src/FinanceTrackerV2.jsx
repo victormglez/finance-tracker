@@ -1916,10 +1916,17 @@ function Dashboard({
   const markCyclePaid = async (payKey) => {
     if (!payKey) return;
     const [monthKey, accountId] = payKey.split("|");
-    await sb.from("paid_cycles").upsert(
+    const { error } = await sb.from("paid_cycles").upsert(
       { user_id: session?.user?.id, account_id: accountId, month_key: monthKey },
       { onConflict: "user_id,account_id,month_key" },
     );
+    if (error) {
+      console.error("paid_cycles write failed:", error);
+      alert(
+        `No se pudo guardar el estado de pago:\n${error.message}\n\n¿Ya creaste la tabla "paid_cycles" en Supabase?`,
+      );
+      return;
+    }
     setPaidCycles((prev) => new Set(prev).add(payKey));
   };
 
@@ -3503,18 +3510,23 @@ function Expenses({
   const togglePaid = async (payKey, payment) => {
     const wasAlreadyPaid = paidPayments.has(payKey);
     const [monthKey, accountId] = payKey.split("|");
-    if (wasAlreadyPaid) {
-      await sb
-        .from("paid_cycles")
-        .delete()
-        .eq("user_id", session?.user?.id)
-        .eq("account_id", accountId)
-        .eq("month_key", monthKey);
-    } else {
-      await sb.from("paid_cycles").upsert(
-        { user_id: session?.user?.id, account_id: accountId, month_key: monthKey },
-        { onConflict: "user_id,account_id,month_key" },
+    const { error } = wasAlreadyPaid
+      ? await sb
+          .from("paid_cycles")
+          .delete()
+          .eq("user_id", session?.user?.id)
+          .eq("account_id", accountId)
+          .eq("month_key", monthKey)
+      : await sb.from("paid_cycles").upsert(
+          { user_id: session?.user?.id, account_id: accountId, month_key: monthKey },
+          { onConflict: "user_id,account_id,month_key" },
+        );
+    if (error) {
+      console.error("paid_cycles write failed:", error);
+      alert(
+        `No se pudo guardar el estado de pago:\n${error.message}\n\n¿Ya creaste la tabla "paid_cycles" en Supabase?`,
       );
+      return;
     }
     setPaidPayments((prev) => {
       const next = new Set(prev);
@@ -5453,11 +5465,12 @@ function Expenses({
             // amount — a partial payment shouldn't hide the remaining debt.
             if (cycleKey && amt >= cycleTotal - 0.5) {
               const [monthKey, accountId] = cycleKey.split("|");
-              await sb.from("paid_cycles").upsert(
+              const { error: paidErr } = await sb.from("paid_cycles").upsert(
                 { user_id: session?.user?.id, account_id: accountId, month_key: monthKey },
                 { onConflict: "user_id,account_id,month_key" },
               );
-              setPaidPayments((prev) => new Set(prev).add(cycleKey));
+              if (paidErr) console.error("paid_cycles write failed:", paidErr);
+              else setPaidPayments((prev) => new Set(prev).add(cycleKey));
             }
             setPayTDCForm((f) => ({ ...f, amount: "" }));
             setShowPayTDC(false);
