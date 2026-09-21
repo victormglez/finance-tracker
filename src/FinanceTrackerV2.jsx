@@ -889,7 +889,7 @@ function NumberStepper({ value, onChange, min = 0, max = 999 }) {
 }
 
 // ─── ACCOUNT CARD ─────────────────────────────────────────────────────────────
-function AccountCard({ acc, onClick, onViewCharges, closedAmount, onQuickPay }) {
+function AccountCard({ acc, onClick, onViewCharges, closedAmount, onQuickPay, onEditCycle }) {
   const pct = acc.type === "credit" ? utilPct(acc.balance, acc.limit) : null;
   const nextCut = acc.cutDay ? nextOccurrence(acc.cutDay) : null;
   const nextPay = acc.payDay ? nextOccurrence(acc.payDay) : null;
@@ -1014,6 +1014,26 @@ function AccountCard({ acc, onClick, onViewCharges, closedAmount, onQuickPay }) 
             <Badge color={dPay <= 3 ? C.red : C.blue}>
               Pago: {dPay === 0 ? "Hoy" : `${dPay}d`}
             </Badge>
+          )}
+          {onEditCycle && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditCycle();
+              }}
+              title="Editar día de corte y pago"
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                fontSize: 11,
+                padding: 0,
+                color: C.sub,
+                lineHeight: 1,
+              }}
+            >
+              ✏️
+            </button>
           )}
         </div>
       )}
@@ -1856,9 +1876,41 @@ function Dashboard({
   // ── Accounts ──
   const [showAddAcc, setShowAddAcc] = useState(false);
   const [editingAcc, setEditingAcc] = useState(null);
+  const [editingCycleAcc, setEditingCycleAcc] = useState(null); // holds acc
+  const [cycleForm, setCycleForm] = useState({ cutDay: 12, payDay: 7 });
   const [viewingCardExpenses, setViewingCardExpenses] = useState(null); // holds acc
   const [editingChargeId, setEditingChargeId] = useState(null);
   const [editChargeVal, setEditChargeVal] = useState("");
+
+  const openEditCycle = (acc) => {
+    setCycleForm({ cutDay: acc.cutDay || 12, payDay: acc.payDay || 7 });
+    setEditingCycleAcc(acc);
+  };
+  // Every existing charge's payment_date was computed with whatever cut/pay
+  // day was set at the time — when the cycle changes, recompute them all so
+  // "Pagar TDC" and the closed-cycle total group by the new schedule instead
+  // of stale cycles.
+  const resyncPaymentDates = async (accountId, cutDay, payDay) => {
+    const toFix = expenses.filter(
+      (e) => e.accountId === accountId && e.paymentDate,
+    );
+    await Promise.all(
+      toFix.map((e) => {
+        const newPd = calcPaymentDate(e.date, cutDay, payDay);
+        return newPd === e.paymentDate
+          ? null
+          : sb.from("expenses").update({ payment_date: newPd }).eq("id", e.id);
+      }),
+    );
+  };
+  const saveCycle = async () => {
+    if (!editingCycleAcc) return;
+    const { cutDay, payDay } = cycleForm;
+    await onUpdateAccount({ ...editingCycleAcc, cutDay, payDay });
+    await resyncPaymentDates(editingCycleAcc.id, cutDay, payDay);
+    setEditingCycleAcc(null);
+    if (reloadAll) await reloadAll();
+  };
 
   const cardCharges = viewingCardExpenses
     ? expenses
@@ -2259,6 +2311,9 @@ function Dashboard({
               onViewCharges={() => setViewingCardExpenses(acc)}
               closedAmount={acc.type === "credit" ? closedCycleAmount(acc) : 0}
               onQuickPay={() => openQuickPay(acc)}
+              onEditCycle={
+                acc.type === "credit" ? () => openEditCycle(acc) : null
+              }
             />
           ))}
         </div>
@@ -2505,9 +2560,16 @@ function Dashboard({
         open={!!editingAcc}
         onClose={() => setEditingAcc(null)}
         editAccount={editingAcc}
-        onSave={(data) => {
-          onUpdateAccount({ ...editingAcc, ...data });
+        onSave={async (data) => {
+          const cycleChanged =
+            editingAcc.type === "credit" &&
+            (data.cutDay !== editingAcc.cutDay ||
+              data.payDay !== editingAcc.payDay);
+          await onUpdateAccount({ ...editingAcc, ...data });
+          if (cycleChanged)
+            await resyncPaymentDates(editingAcc.id, data.cutDay, data.payDay);
           setEditingAcc(null);
+          if (cycleChanged && reloadAll) await reloadAll();
         }}
         onDelete={() => {
           onDeleteAccount(editingAcc.id);
@@ -2808,6 +2870,38 @@ function Dashboard({
         <SaveBtn onClick={confirmQuickPay} color={C.green}>
           Registrar Pago
         </SaveBtn>
+      </Modal>
+
+      <Modal
+        open={!!editingCycleAcc}
+        onClose={() => setEditingCycleAcc(null)}
+        title={`🗓️ Ciclo de ${editingCycleAcc?.name || "Tarjeta"}`}
+      >
+        <Field label="Día de corte" hint="Fin del ciclo de facturación">
+          <Stepper
+            value={cycleForm.cutDay}
+            onChange={(v) => setCycleForm((f) => ({ ...f, cutDay: v }))}
+          />
+          <p style={{ fontSize: 11, color: C.sub, margin: "6px 0 0" }}>
+            Gastos antes del día{" "}
+            <b style={{ color: C.orange }}>{cycleForm.cutDay}</b> entran al
+            ciclo actual
+          </p>
+        </Field>
+        <Field
+          label="Día límite de pago"
+          hint="Fecha máxima para pagar sin intereses"
+        >
+          <Stepper
+            value={cycleForm.payDay}
+            onChange={(v) => setCycleForm((f) => ({ ...f, payDay: v }))}
+          />
+          <p style={{ fontSize: 11, color: C.sub, margin: "6px 0 0" }}>
+            Tu pago vence el <b style={{ color: C.red }}>día {cycleForm.payDay}</b>{" "}
+            de cada mes
+          </p>
+        </Field>
+        <SaveBtn onClick={saveCycle}>Guardar</SaveBtn>
       </Modal>
 
       <Modal
