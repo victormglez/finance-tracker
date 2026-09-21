@@ -92,6 +92,20 @@ function calcPaymentDate(purchaseDate, cutDay, payDay) {
   return `${payDate.getFullYear()}-${String(payDate.getMonth() + 1).padStart(2, "0")}-${String(actualPayDay).padStart(2, "0")}`;
 }
 
+// The pay-date of the most recently CLOSED billing cycle for an account —
+// i.e. the cutoff has already happened, so this total is final and safe to
+// pay early (before the actual due date). Returns null if the account has
+// no billing cycle (debit, or missing cutDay/payDay).
+function closedCyclePayDate(acc) {
+  if (!acc?.cutDay || !acc?.payDay) return null;
+  const now = new Date();
+  let lastCut = new Date(now.getFullYear(), now.getMonth(), acc.cutDay);
+  if (lastCut > now) lastCut = new Date(now.getFullYear(), now.getMonth() - 1, acc.cutDay);
+  const dayBeforeCut = new Date(lastCut.getFullYear(), lastCut.getMonth(), lastCut.getDate() - 1);
+  const dbc = `${dayBeforeCut.getFullYear()}-${String(dayBeforeCut.getMonth() + 1).padStart(2, "0")}-${String(dayBeforeCut.getDate()).padStart(2, "0")}`;
+  return calcPaymentDate(dbc, acc.cutDay, acc.payDay);
+}
+
 // MSI payment date sequence starting from purchaseDate
 function getMsiPaymentDates(purchaseDate, acc, numMonths) {
   if (!acc?.cutDay || !acc?.payDay) return [];
@@ -875,7 +889,7 @@ function NumberStepper({ value, onChange, min = 0, max = 999 }) {
 }
 
 // ─── ACCOUNT CARD ─────────────────────────────────────────────────────────────
-function AccountCard({ acc, onClick, onViewCharges }) {
+function AccountCard({ acc, onClick, onViewCharges, closedAmount, onQuickPay }) {
   const pct = acc.type === "credit" ? utilPct(acc.balance, acc.limit) : null;
   const nextCut = acc.cutDay ? nextOccurrence(acc.cutDay) : null;
   const nextPay = acc.payDay ? nextOccurrence(acc.payDay) : null;
@@ -1002,6 +1016,34 @@ function AccountCard({ acc, onClick, onViewCharges }) {
             </Badge>
           )}
         </div>
+      )}
+      {acc.type === "credit" && onQuickPay && (
+        <button
+          disabled={!closedAmount}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (closedAmount) onQuickPay();
+          }}
+          title={
+            closedAmount
+              ? `Pagar ${mxn(closedAmount)} del corte cerrado`
+              : "El corte de este ciclo aún no cierra"
+          }
+          style={{
+            width: "100%",
+            marginTop: 8,
+            background: closedAmount ? C.greenDim : C.elevated,
+            border: `1px solid ${closedAmount ? C.green + "55" : C.border}`,
+            borderRadius: 9,
+            padding: "7px 0",
+            color: closedAmount ? C.green : C.muted,
+            fontSize: 11,
+            fontWeight: 700,
+            cursor: closedAmount ? "pointer" : "not-allowed",
+          }}
+        >
+          {closedAmount ? `💳 Pagar ${mxn(closedAmount)}` : "🔒 Corte sin cerrar"}
+        </button>
       )}
     </div>
   );
@@ -1854,6 +1896,63 @@ function Dashboard({
     if (reloadAll) await reloadAll();
   };
 
+  // Quick-pay a card straight from its account card — only enabled once the
+  // billing cycle has actually cut, so the amount is final, and pre-filled
+  // with just that period's total instead of the account's full balance.
+  const [payingCard, setPayingCard] = useState(null); // holds acc
+  const [payCardAmount, setPayCardAmount] = useState("");
+
+  const closedCycleCharges = (acc) => {
+    const pd = closedCyclePayDate(acc);
+    if (!pd) return [];
+    return expenses.filter(
+      (e) => e.accountId === acc.id && e.paymentDate === pd,
+    );
+  };
+  const closedCycleAmount = (acc) =>
+    closedCycleCharges(acc).reduce((s, e) => s + e.amount, 0);
+
+  const openQuickPay = (acc) => {
+    setPayCardAmount(String(closedCycleAmount(acc)));
+    setPayingCard(acc);
+  };
+
+  const confirmQuickPay = async () => {
+    const amt = parseFloat(payCardAmount);
+    if (isNaN(amt) || amt <= 0 || !payingCard) return;
+    const nominaAcc = accounts.find((a) => a.type === "debit");
+    if (nominaAcc && nominaAcc.balance < amt) {
+      alert(
+        `Saldo insuficiente en ${nominaAcc.name}.\nDisponible: ${mxn(nominaAcc.balance)}\nNecesitas: ${mxn(amt)}`,
+      );
+      return;
+    }
+    await sb
+      .from("accounts")
+      .update({ balance: payingCard.balance - amt })
+      .eq("id", payingCard.id);
+    if (nominaAcc)
+      await sb
+        .from("accounts")
+        .update({ balance: nominaAcc.balance - amt })
+        .eq("id", nominaAcc.id);
+    await sb.from("expenses").insert({
+      user_id: session?.user?.id,
+      description: `Pago ${payingCard.name}`,
+      amount: amt,
+      date: today(),
+      account_id: nominaAcc?.id || payingCard.id,
+      category_id: null,
+      payment_date: null,
+      is_msi: false,
+      is_tdc_payment: true,
+      is_subscription: false,
+    });
+    setPayingCard(null);
+    setPayCardAmount("");
+    if (reloadAll) await reloadAll();
+  };
+
   // ── Transfers ──
   const [showAddTrans, setShowAddTrans] = useState(false);
   const [editingTrans, setEditingTrans] = useState(null);
@@ -2158,6 +2257,8 @@ function Dashboard({
               acc={acc}
               onClick={() => setEditingAcc(acc)}
               onViewCharges={() => setViewingCardExpenses(acc)}
+              closedAmount={acc.type === "credit" ? closedCycleAmount(acc) : 0}
+              onQuickPay={() => openQuickPay(acc)}
             />
           ))}
         </div>
@@ -2603,6 +2704,110 @@ function Dashboard({
             </div>
           )}
         </div>
+      </Modal>
+
+      <Modal
+        open={!!payingCard}
+        onClose={() => setPayingCard(null)}
+        title={`💳 Pagar ${payingCard?.name || "Tarjeta"}`}
+      >
+        <div style={{ fontSize: 12, color: C.sub, marginBottom: 12 }}>
+          Cargos del corte ya cerrado (no incluye el ciclo actual, aún sin
+          cortar). Se descuenta de{" "}
+          <b style={{ color: "#4CAF50" }}>
+            {accounts.find((a) => a.type === "debit")?.name || "Nómina"}
+          </b>
+          .
+        </div>
+        {payingCard && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              marginBottom: 16,
+              maxHeight: 280,
+              overflowY: "auto",
+            }}
+          >
+            {closedCycleCharges(payingCard).map((exp) => {
+              const cat = categories.find((c) => c.id === exp.categoryId);
+              return (
+                <div
+                  key={exp.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    background: C.elevated,
+                    borderRadius: 11,
+                    padding: "9px 12px",
+                    border: `1px solid ${C.border}`,
+                  }}
+                >
+                  <span style={{ fontSize: 18, flexShrink: 0 }}>
+                    {cat?.icon || "🧾"}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: C.text,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {exp.description}
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        marginTop: 2,
+                        alignItems: "center",
+                      }}
+                    >
+                      {cat && <Tag color={cat.color}>{cat.name}</Tag>}
+                      <span style={{ fontSize: 10, color: C.muted }}>
+                        {fmtDateShort(exp.date)}
+                      </span>
+                    </div>
+                  </div>
+                  <div
+                    style={{ fontSize: 12, fontWeight: 800, color: payingCard.color }}
+                  >
+                    {mxn(exp.amount)}
+                  </div>
+                </div>
+              );
+            })}
+            {closedCycleCharges(payingCard).length === 0 && (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "16px 0",
+                  color: C.muted,
+                  fontSize: 12,
+                }}
+              >
+                Sin cargos en el corte cerrado
+              </div>
+            )}
+          </div>
+        )}
+        <Field label="Monto a pagar (MXN)">
+          <Input
+            value={payCardAmount}
+            onChange={setPayCardAmount}
+            placeholder="0.00"
+            type="number"
+          />
+        </Field>
+        <SaveBtn onClick={confirmQuickPay} color={C.green}>
+          Registrar Pago
+        </SaveBtn>
       </Modal>
 
       <Modal
@@ -4804,11 +5009,21 @@ function Expenses({
               .filter((a) => a.type === "credit")
               .map((acc) => {
                 const selected = payTDCForm.accountId === acc.id;
+                const pd = closedCyclePayDate(acc);
+                const closedAmt = pd
+                  ? expenses
+                      .filter((e) => e.accountId === acc.id && e.paymentDate === pd)
+                      .reduce((s, e) => s + e.amount, 0)
+                  : 0;
                 return (
                   <button
                     key={acc.id}
                     onClick={() =>
-                      setPayTDCForm((f) => ({ ...f, accountId: acc.id }))
+                      setPayTDCForm((f) => ({
+                        ...f,
+                        accountId: acc.id,
+                        amount: closedAmt > 0 ? String(closedAmt) : f.amount,
+                      }))
                     }
                     style={{
                       display: "flex",
@@ -4828,8 +5043,10 @@ function Expenses({
                       >
                         {acc.name}
                       </div>
-                      <div style={{ fontSize: 11, color: C.red }}>
-                        Deuda: {mxn(Math.abs(acc.balance))}
+                      <div style={{ fontSize: 11, color: closedAmt > 0 ? C.orange : C.muted }}>
+                        {closedAmt > 0
+                          ? `Corte a pagar: ${mxn(closedAmt)}`
+                          : "Corte sin cerrar"}
                       </div>
                     </div>
                     {selected && (
@@ -4840,6 +5057,44 @@ function Expenses({
               })}
           </div>
         </Field>
+        {payTDCForm.accountId &&
+          (() => {
+            const acc = accounts.find((a) => a.id === payTDCForm.accountId);
+            const pd = acc ? closedCyclePayDate(acc) : null;
+            const charges = pd
+              ? expenses.filter((e) => e.accountId === acc.id && e.paymentDate === pd)
+              : [];
+            return (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: C.muted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+                  Cargos del corte cerrado
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 240, overflowY: "auto" }}>
+                  {charges.map((exp) => {
+                    const cat = categories.find((c) => c.id === exp.categoryId);
+                    return (
+                      <div key={exp.id} style={{ display: "flex", alignItems: "center", gap: 10, background: C.elevated, borderRadius: 11, padding: "9px 12px", border: `1px solid ${C.border}` }}>
+                        <span style={{ fontSize: 18, flexShrink: 0 }}>{cat?.icon || "🧾"}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{exp.description}</div>
+                          <div style={{ display: "flex", gap: 6, marginTop: 2, alignItems: "center" }}>
+                            {cat && <Tag color={cat.color}>{cat.name}</Tag>}
+                            <span style={{ fontSize: 10, color: C.muted }}>{fmtDateShort(exp.date)}</span>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: acc?.color || C.accent }}>{mxn(exp.amount)}</div>
+                      </div>
+                    );
+                  })}
+                  {charges.length === 0 && (
+                    <div style={{ textAlign: "center", padding: "12px 0", color: C.muted, fontSize: 12 }}>
+                      Sin cargos en el corte cerrado
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         <Field label="Monto del pago (MXN)">
           <Input
             value={payTDCForm.amount}
