@@ -1021,7 +1021,7 @@ function AccountCard({ acc, onClick, onViewCharges, closedAmount, isCyclePaid, o
                 e.stopPropagation();
                 onEditCycle();
               }}
-              title="Editar día de corte y pago"
+              title="Editar límite, corte y pago"
               style={{
                 background: "none",
                 border: "none",
@@ -1887,7 +1887,7 @@ function Dashboard({
   const [showAddAcc, setShowAddAcc] = useState(false);
   const [editingAcc, setEditingAcc] = useState(null);
   const [editingCycleAcc, setEditingCycleAcc] = useState(null); // holds acc
-  const [cycleForm, setCycleForm] = useState({ cutDay: 12, payDay: 7 });
+  const [cycleForm, setCycleForm] = useState({ cutDay: 12, payDay: 7, limit: "" });
   const [viewingCardExpenses, setViewingCardExpenses] = useState(null); // holds acc
   const [editingChargeId, setEditingChargeId] = useState(null);
   const [editChargeVal, setEditChargeVal] = useState("");
@@ -1924,7 +1924,11 @@ function Dashboard({
   };
 
   const openEditCycle = (acc) => {
-    setCycleForm({ cutDay: acc.cutDay || 12, payDay: acc.payDay || 7 });
+    setCycleForm({
+      cutDay: acc.cutDay || 12,
+      payDay: acc.payDay || 7,
+      limit: acc.limit != null ? String(acc.limit) : "",
+    });
     setEditingCycleAcc(acc);
   };
   // Every existing charge's payment_date was computed with whatever cut/pay
@@ -1947,7 +1951,8 @@ function Dashboard({
   const saveCycle = async () => {
     if (!editingCycleAcc) return;
     const { cutDay, payDay } = cycleForm;
-    await onUpdateAccount({ ...editingCycleAcc, cutDay, payDay });
+    const limit = parseFloat(cycleForm.limit) || 0;
+    await onUpdateAccount({ ...editingCycleAcc, cutDay, payDay, limit });
     await resyncPaymentDates(editingCycleAcc.id, cutDay, payDay);
     setEditingCycleAcc(null);
     if (reloadAll) await reloadAll();
@@ -2924,8 +2929,16 @@ function Dashboard({
       <Modal
         open={!!editingCycleAcc}
         onClose={() => setEditingCycleAcc(null)}
-        title={`🗓️ Ciclo de ${editingCycleAcc?.name || "Tarjeta"}`}
+        title={`💳 Configurar ${editingCycleAcc?.name || "Tarjeta"}`}
       >
+        <Field label="Límite de crédito (MXN)">
+          <Input
+            value={cycleForm.limit}
+            onChange={(v) => setCycleForm((f) => ({ ...f, limit: v }))}
+            placeholder="Ej. 30000"
+            type="number"
+          />
+        </Field>
         <Field label="Día de corte" hint="Fin del ciclo de facturación">
           <Stepper
             value={cycleForm.cutDay}
