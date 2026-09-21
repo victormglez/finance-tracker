@@ -4385,7 +4385,7 @@ function Expenses({
         {isSavingsCat && (
           <Field label="¿A qué meta va este ahorro?" hint="Requerido">
             <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-              {goals.map((g) => {
+              {goals.filter((g) => !g.archived).map((g) => {
                 const pct = g.target > 0 ? (g.current / g.target) * 100 : 0;
                 const sel = form.linkedGoalId === g.id;
                 return (
@@ -5995,11 +5995,13 @@ function Goals({
     { id: "remaining", label: "Falta" },
   ];
   const sortedGoals = useMemo(() => {
-    const withStats = goals.map((g) => ({
-      ...g,
-      pct: g.target > 0 ? (g.current / g.target) * 100 : 0,
-      remaining: Math.max(0, g.target - g.current),
-    }));
+    const withStats = goals
+      .filter((g) => !g.archived)
+      .map((g) => ({
+        ...g,
+        pct: g.target > 0 ? (g.current / g.target) * 100 : 0,
+        remaining: Math.max(0, g.target - g.current),
+      }));
     const sorters = {
       name: (a, b) => a.name.localeCompare(b.name),
       progress: (a, b) => b.pct - a.pct,
@@ -6008,6 +6010,11 @@ function Goals({
     };
     return withStats.sort(sorters[sortBy] || sorters.name);
   }, [goals, sortBy]);
+  const archivedGoals = useMemo(
+    () => goals.filter((g) => g.archived),
+    [goals],
+  );
+  const [showArchived, setShowArchived] = useState(false);
 
   const withdrawalsByGoal = useMemo(() => {
     const map = {};
@@ -6077,6 +6084,19 @@ function Goals({
   const deleteGoal = async () => {
     await sb.from("goals").delete().eq("id", editing.id);
     setEditing(null);
+    if (reloadAll) await reloadAll();
+  };
+
+  // Archiving hides a finished goal from the active list without deleting
+  // it — past expenses linked to it keep showing its name/icon correctly,
+  // unlike a hard delete which would orphan that link.
+  const archiveGoal = async (goal) => {
+    await sb.from("goals").update({ archived: true }).eq("id", goal.id);
+    setEditing(null);
+    if (reloadAll) await reloadAll();
+  };
+  const unarchiveGoal = async (goal) => {
+    await sb.from("goals").update({ archived: false }).eq("id", goal.id);
     if (reloadAll) await reloadAll();
   };
 
@@ -6550,10 +6570,96 @@ function Goals({
             </div>
           );
         })}
-        {goals.length === 0 && (
+        {sortedGoals.length === 0 && (
           <div style={{ textAlign: "center", paddingTop: 60, color: C.muted }}>
             <div style={{ fontSize: 40 }}>🎯</div>
             <div style={{ marginTop: 10 }}>Sin metas</div>
+          </div>
+        )}
+
+        {archivedGoals.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <button
+              onClick={() => setShowArchived((v) => !v)}
+              style={{
+                width: "100%",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: "8px 2px",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  color: C.muted,
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  flex: 1,
+                  textAlign: "left",
+                }}
+              >
+                📦 Archivadas ({archivedGoals.length})
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: C.muted,
+                  transition: "transform .2s",
+                  transform: showArchived ? "rotate(180deg)" : "rotate(0deg)",
+                }}
+              >
+                ▾
+              </span>
+            </button>
+            {showArchived &&
+              archivedGoals.map((goal) => (
+                <div
+                  key={goal.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    background: C.card,
+                    borderRadius: 14,
+                    padding: "10px 14px",
+                    marginBottom: 8,
+                    border: `1px solid ${C.border}`,
+                    opacity: 0.75,
+                  }}
+                >
+                  <span style={{ fontSize: 18 }}>{goal.icon}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{ fontSize: 13, fontWeight: 700, color: C.text }}
+                    >
+                      {goal.name}
+                    </div>
+                    <div style={{ fontSize: 10, color: C.muted }}>
+                      {mxn(goal.current)} / {mxn(goal.target)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => unarchiveGoal(goal)}
+                    style={{
+                      background: C.elevated,
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 8,
+                      padding: "6px 10px",
+                      color: C.sub,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    ↩️ Restaurar
+                  </button>
+                </div>
+              ))}
           </div>
         )}
       </div>
@@ -6600,24 +6706,40 @@ function Goals({
             onChange={(v) => setEditForm((f) => ({ ...f, color: v }))}
           />
         </Field>
-        <button
-          onClick={deleteGoal}
-          style={{
-            width: "100%",
-            background: C.redDim,
-            border: `1px solid ${C.red}44`,
-            borderRadius: 12,
-            padding: "11px 0",
-            color: C.red,
-            fontSize: 13,
-            fontWeight: 700,
-            cursor: "pointer",
-            marginBottom: 8,
-            marginTop: 4,
-          }}
-        >
-          🗑 Eliminar meta
-        </button>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8, marginTop: 4 }}>
+          <button
+            onClick={() => archiveGoal(editing)}
+            style={{
+              flex: 1,
+              background: C.elevated,
+              border: `1px solid ${C.border}`,
+              borderRadius: 12,
+              padding: "11px 0",
+              color: C.sub,
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            📦 Archivar
+          </button>
+          <button
+            onClick={deleteGoal}
+            style={{
+              flex: 1,
+              background: C.redDim,
+              border: `1px solid ${C.red}44`,
+              borderRadius: 12,
+              padding: "11px 0",
+              color: C.red,
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            🗑 Eliminar meta
+          </button>
+        </div>
         <SaveBtn onClick={saveEdit} color={editForm.color}>
           Guardar Cambios
         </SaveBtn>
@@ -8484,6 +8606,7 @@ export default function App() {
         current: Number(g.current_amount),
         icon: g.icon,
         color: g.color,
+        archived: g.archived || false,
       })),
     );
     setPlans(
