@@ -5986,30 +5986,16 @@ function Goals({
   });
   const [nextId, setNextId] = useState(20);
   const [openHistory, setOpenHistory] = useState({});
-  const [sortBy, setSortBy] = useState("name");
 
-  const SORT_OPTIONS = [
-    { id: "name", label: "Nombre" },
-    { id: "progress", label: "Progreso" },
-    { id: "target", label: "Meta" },
-    { id: "remaining", label: "Falta" },
-  ];
   const sortedGoals = useMemo(() => {
     const withStats = goals
       .filter((g) => !g.archived)
       .map((g) => ({
         ...g,
         pct: g.target > 0 ? (g.current / g.target) * 100 : 0,
-        remaining: Math.max(0, g.target - g.current),
       }));
-    const sorters = {
-      name: (a, b) => a.name.localeCompare(b.name),
-      progress: (a, b) => b.pct - a.pct,
-      target: (a, b) => b.target - a.target,
-      remaining: (a, b) => a.remaining - b.remaining,
-    };
-    return withStats.sort(sorters[sortBy] || sorters.name);
-  }, [goals, sortBy]);
+    return withStats.sort((a, b) => b.pct - a.pct);
+  }, [goals]);
   const archivedGoals = useMemo(
     () => goals.filter((g) => g.archived),
     [goals],
@@ -6279,37 +6265,6 @@ function Goals({
             +
           </button>
         </div>
-      </div>
-
-      <div
-        style={{
-          padding: "0 20px 12px",
-          display: "flex",
-          gap: 6,
-          flexWrap: "wrap",
-        }}
-      >
-        {SORT_OPTIONS.map((opt) => {
-          const active = sortBy === opt.id;
-          return (
-            <button
-              key={opt.id}
-              onClick={() => setSortBy(opt.id)}
-              style={{
-                background: active ? C.accentDim : C.card,
-                border: `1px solid ${active ? C.accent : C.border}`,
-                borderRadius: 20,
-                padding: "6px 12px",
-                color: active ? C.accent : C.sub,
-                fontSize: 11,
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              {opt.label}
-            </button>
-          );
-        })}
       </div>
 
       <div
