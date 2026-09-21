@@ -889,7 +889,7 @@ function NumberStepper({ value, onChange, min = 0, max = 999 }) {
 }
 
 // ─── ACCOUNT CARD ─────────────────────────────────────────────────────────────
-function AccountCard({ acc, onClick, onViewCharges, closedAmount, onQuickPay, onEditCycle }) {
+function AccountCard({ acc, onClick, onViewCharges, closedAmount, isCyclePaid, onQuickPay, onEditCycle }) {
   const pct = acc.type === "credit" ? utilPct(acc.balance, acc.limit) : null;
   const nextCut = acc.cutDay ? nextOccurrence(acc.cutDay) : null;
   const nextPay = acc.payDay ? nextOccurrence(acc.payDay) : null;
@@ -1039,30 +1039,40 @@ function AccountCard({ acc, onClick, onViewCharges, closedAmount, onQuickPay, on
       )}
       {acc.type === "credit" && onQuickPay && (
         <button
-          disabled={!closedAmount}
+          disabled={!closedAmount || isCyclePaid}
           onClick={(e) => {
             e.stopPropagation();
-            if (closedAmount) onQuickPay();
+            if (closedAmount && !isCyclePaid) onQuickPay();
           }}
           title={
-            closedAmount
-              ? `Pagar ${mxn(closedAmount)} del corte cerrado`
-              : "El corte de este ciclo aún no cierra"
+            isCyclePaid
+              ? "Ya registraste el pago de este corte"
+              : closedAmount
+                ? `Pagar ${mxn(closedAmount)} del corte cerrado`
+                : "El corte de este ciclo aún no cierra"
           }
           style={{
             width: "100%",
             marginTop: 8,
-            background: closedAmount ? C.greenDim : C.elevated,
-            border: `1px solid ${closedAmount ? C.green + "55" : C.border}`,
+            background: isCyclePaid
+              ? C.greenDim
+              : closedAmount
+                ? C.greenDim
+                : C.elevated,
+            border: `1px solid ${closedAmount || isCyclePaid ? C.green + "55" : C.border}`,
             borderRadius: 9,
             padding: "7px 0",
-            color: closedAmount ? C.green : C.muted,
+            color: closedAmount || isCyclePaid ? C.green : C.muted,
             fontSize: 11,
             fontWeight: 700,
-            cursor: closedAmount ? "pointer" : "not-allowed",
+            cursor: closedAmount && !isCyclePaid ? "pointer" : "not-allowed",
           }}
         >
-          {closedAmount ? `💳 Pagar ${mxn(closedAmount)}` : "🔒 Corte sin cerrar"}
+          {isCyclePaid
+            ? "✅ Corte pagado"
+            : closedAmount
+              ? `💳 Pagar ${mxn(closedAmount)}`
+              : "🔒 Corte sin cerrar"}
         </button>
       )}
     </div>
@@ -1882,6 +1892,37 @@ function Dashboard({
   const [editingChargeId, setEditingChargeId] = useState(null);
   const [editChargeVal, setEditChargeVal] = useState("");
 
+  // Shares the same "paid" tracking Gastos uses for its Pagos de Tarjeta
+  // checkmarks, keyed the same way (month-of-payment-date|accountId), so
+  // paying here reflects there too and vice versa. Persisted in Supabase
+  // (paid_cycles table) rather than localStorage, so it syncs across devices.
+  const [paidCycles, setPaidCycles] = useState(new Set());
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    sb.from("paid_cycles")
+      .select("account_id, month_key")
+      .eq("user_id", session.user.id)
+      .then(({ data }) => {
+        if (data)
+          setPaidCycles(
+            new Set(data.map((r) => `${r.month_key}|${r.account_id}`)),
+          );
+      });
+  }, [session]);
+  const cyclePayKey = (acc) => {
+    const pd = closedCyclePayDate(acc);
+    return pd ? pd.slice(0, 7) + "|" + acc.id : null;
+  };
+  const markCyclePaid = async (payKey) => {
+    if (!payKey) return;
+    const [monthKey, accountId] = payKey.split("|");
+    await sb.from("paid_cycles").upsert(
+      { user_id: session?.user?.id, account_id: accountId, month_key: monthKey },
+      { onConflict: "user_id,account_id,month_key" },
+    );
+    setPaidCycles((prev) => new Set(prev).add(payKey));
+  };
+
   const openEditCycle = (acc) => {
     setCycleForm({ cutDay: acc.cutDay || 12, payDay: acc.payDay || 7 });
     setEditingCycleAcc(acc);
@@ -1972,6 +2013,8 @@ function Dashboard({
   const confirmQuickPay = async () => {
     const amt = parseFloat(payCardAmount);
     if (isNaN(amt) || amt <= 0 || !payingCard) return;
+    const totalDue = closedCycleAmount(payingCard);
+    const payKey = cyclePayKey(payingCard);
     const nominaAcc = accounts.find((a) => a.type === "debit");
     if (nominaAcc && nominaAcc.balance < amt) {
       alert(
@@ -2000,6 +2043,9 @@ function Dashboard({
       is_tdc_payment: true,
       is_subscription: false,
     });
+    // Only mark the cycle as settled if this covers the full closed amount —
+    // a partial payment shouldn't hide the remaining debt.
+    if (amt >= totalDue - 0.5) await markCyclePaid(payKey);
     setPayingCard(null);
     setPayCardAmount("");
     if (reloadAll) await reloadAll();
@@ -2310,6 +2356,9 @@ function Dashboard({
               onClick={() => setEditingAcc(acc)}
               onViewCharges={() => setViewingCardExpenses(acc)}
               closedAmount={acc.type === "credit" ? closedCycleAmount(acc) : 0}
+              isCyclePaid={
+                acc.type === "credit" && paidCycles.has(cyclePayKey(acc))
+              }
               onQuickPay={() => openQuickPay(acc)}
               onEditCycle={
                 acc.type === "credit" ? () => openEditCycle(acc) : null
@@ -3360,15 +3409,19 @@ function Expenses({
   const [showDetail, setShowDetail] = useState(null);
   const [editDate, setEditDate] = useState(null);
   const [expenseEdit, setExpenseEdit] = useState(null);
-  const [paidPayments, setPaidPayments] = useState(() => {
-    try {
-      return new Set(
-        JSON.parse(localStorage.getItem("paidTdcPayments") || "[]"),
-      );
-    } catch {
-      return new Set();
-    }
-  });
+  const [paidPayments, setPaidPayments] = useState(new Set());
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    sb.from("paid_cycles")
+      .select("account_id, month_key")
+      .eq("user_id", session.user.id)
+      .then(({ data }) => {
+        if (data)
+          setPaidPayments(
+            new Set(data.map((r) => `${r.month_key}|${r.account_id}`)),
+          );
+      });
+  }, [session]);
   const [msiConfirmPayment, setMsiConfirmPayment] = useState(null);
   const [showCardDetail, setShowCardDetail] = useState(null); // holds `p` payment object
   const deleteExpenseFromCard = async (exp) => {
@@ -3434,18 +3487,31 @@ function Expenses({
     }
     setEditingPayAmount(null);
   };
-  const togglePaid = (payKey, payment) => {
+  const togglePaid = async (payKey, payment) => {
+    const wasAlreadyPaid = paidPayments.has(payKey);
+    const [monthKey, accountId] = payKey.split("|");
+    if (wasAlreadyPaid) {
+      await sb
+        .from("paid_cycles")
+        .delete()
+        .eq("user_id", session?.user?.id)
+        .eq("account_id", accountId)
+        .eq("month_key", monthKey);
+    } else {
+      await sb.from("paid_cycles").upsert(
+        { user_id: session?.user?.id, account_id: accountId, month_key: monthKey },
+        { onConflict: "user_id,account_id,month_key" },
+      );
+    }
     setPaidPayments((prev) => {
       const next = new Set(prev);
-      const wasAlreadyPaid = prev.has(payKey);
       wasAlreadyPaid ? next.delete(payKey) : next.add(payKey);
-      localStorage.setItem("paidTdcPayments", JSON.stringify([...next]));
-      if (!wasAlreadyPaid && payment) {
-        const msiItems = payment.items.filter((e) => e.msiPlanId);
-        if (msiItems.length > 0) setMsiConfirmPayment(payment);
-      }
       return next;
     });
+    if (!wasAlreadyPaid && payment) {
+      const msiItems = payment.items.filter((e) => e.msiPlanId);
+      if (msiItems.length > 0) setMsiConfirmPayment(payment);
+    }
   };
   const markMsiInstallmentsPaid = async () => {
     if (!msiConfirmPayment) return;
@@ -5335,6 +5401,15 @@ function Expenses({
               return;
             }
             const tdcAcc = accounts.find((a) => a.id === payTDCForm.accountId);
+            // Snapshot the closed cycle's total + key before paying, so we can
+            // mark it as settled below (only if this payment covers it fully).
+            const cyclePd = tdcAcc ? closedCyclePayDate(tdcAcc) : null;
+            const cycleKey = cyclePd ? cyclePd.slice(0, 7) + "|" + tdcAcc.id : null;
+            const cycleTotal = cyclePd
+              ? expenses
+                  .filter((e) => e.accountId === tdcAcc.id && e.paymentDate === cyclePd)
+                  .reduce((s, e) => s + e.amount, 0)
+              : 0;
             // Update TDC balance
             await sb
               .from("accounts")
@@ -5361,6 +5436,16 @@ function Expenses({
                 is_tdc_payment: true,
                 is_subscription: false,
               });
+            // Only mark the cycle as settled if this covers the full closed
+            // amount — a partial payment shouldn't hide the remaining debt.
+            if (cycleKey && amt >= cycleTotal - 0.5) {
+              const [monthKey, accountId] = cycleKey.split("|");
+              await sb.from("paid_cycles").upsert(
+                { user_id: session?.user?.id, account_id: accountId, month_key: monthKey },
+                { onConflict: "user_id,account_id,month_key" },
+              );
+              setPaidPayments((prev) => new Set(prev).add(cycleKey));
+            }
             setPayTDCForm((f) => ({ ...f, amount: "" }));
             setShowPayTDC(false);
             if (reloadAll) await reloadAll();
