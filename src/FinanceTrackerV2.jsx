@@ -1007,12 +1007,12 @@ function AccountCard({ acc, onClick, onViewCharges, closedAmount, onQuickPay, on
         >
           {dCut !== null && (
             <Badge color={C.orange}>
-              Corte: {dCut === 0 ? "Hoy" : `${dCut}d`}
+              Corte: día {acc.cutDay} ({dCut === 0 ? "hoy" : `${dCut}d`})
             </Badge>
           )}
           {dPay !== null && (
             <Badge color={dPay <= 3 ? C.red : C.blue}>
-              Pago: {dPay === 0 ? "Hoy" : `${dPay}d`}
+              Pago: día {acc.payDay} ({dPay === 0 ? "hoy" : `${dPay}d`})
             </Badge>
           )}
           {onEditCycle && (
