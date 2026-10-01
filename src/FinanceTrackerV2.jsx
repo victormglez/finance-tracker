@@ -3579,6 +3579,24 @@ function Expenses({
   const [openMonths, setOpenMonths] = useState({});
   const [openDays, setOpenDays] = useState({});
   const [openPayments, setOpenPayments] = useState({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return null;
+    return expenses
+      .filter((e) => {
+        if (e.description?.toLowerCase().includes(q)) return true;
+        const cat = categories.find((c) => c.id === e.categoryId);
+        if (cat?.name?.toLowerCase().includes(q)) return true;
+        const acc = accounts.find((a) => a.id === e.accountId);
+        if (acc?.name?.toLowerCase().includes(q)) return true;
+        const ev = events?.find((ev) => ev.id === e.eventId);
+        if (ev?.name?.toLowerCase().includes(q)) return true;
+        if (String(e.amount).includes(q)) return true;
+        return false;
+      })
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [searchQuery, expenses, categories, accounts, events]);
   const [form, setForm] = useState({
     description: "",
     amount: "",
@@ -3882,7 +3900,89 @@ function Expenses({
         </div>
       </div>
 
-      {/* Accordion by month */}
+      {/* Search */}
+      <div style={{ padding: "0 20px 14px" }}>
+        <div style={{ position: "relative" }}>
+          <span
+            style={{
+              position: "absolute",
+              left: 14,
+              top: "50%",
+              transform: "translateY(-50%)",
+              fontSize: 14,
+              color: C.muted,
+              pointerEvents: "none",
+            }}
+          >
+            🔍
+          </span>
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Buscar por descripción, categoría, cuenta, evento, monto..."
+            style={{
+              width: "100%",
+              background: C.card,
+              border: `1px solid ${C.border}`,
+              borderRadius: 12,
+              padding: "11px 14px 11px 36px",
+              color: C.text,
+              fontSize: 13,
+              outline: "none",
+              boxSizing: "border-box",
+              fontFamily: "inherit",
+            }}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              style={{
+                position: "absolute",
+                right: 10,
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                fontSize: 14,
+                color: C.muted,
+                padding: 4,
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      {searchResults ? (
+        /* Search results — flat list across all months */
+        <div style={{ padding: "0 20px" }}>
+          <div style={{ fontSize: 11, color: C.sub, marginBottom: 10 }}>
+            {searchResults.length} resultado{searchResults.length !== 1 ? "s" : ""}
+            {searchResults.length > 0 &&
+              ` · ${mxn(searchResults.reduce((s, e) => s + e.amount, 0))}`}
+          </div>
+          {searchResults.map((exp) => (
+            <ExpenseRow
+              key={exp.id}
+              exp={exp}
+              accounts={accounts}
+              categories={categories}
+              goals={goals}
+              events={events}
+              onClick={() => setShowDetail(exp)}
+            />
+          ))}
+          {searchResults.length === 0 && (
+            <div style={{ textAlign: "center", paddingTop: 60, color: C.muted }}>
+              <div style={{ fontSize: 40 }}>🔍</div>
+              <div style={{ marginTop: 10 }}>Sin resultados para "{searchQuery}"</div>
+            </div>
+          )}
+        </div>
+      ) : (
+      /* Accordion by month */
       <div style={{ padding: "0 20px" }}>
         {visibleByMonth.length === 0 && (
           <div style={{ textAlign: "center", paddingTop: 80, color: C.muted }}>
@@ -4340,6 +4440,7 @@ function Expenses({
           );
         })}
       </div>
+      )}
 
       {/* Add Modal */}
       <Modal
@@ -6949,7 +7050,7 @@ function Goals({
 function Events({ events, expenses, categories, accounts, session, reloadAll }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [viewingEvent, setViewingEvent] = useState(null); // holds event
+  const [openExpanded, setOpenExpanded] = useState({}); // per event id
   const emptyForm = { name: "", budget: "", icon: "🎉", color: "#7C6FFF" };
   const [addForm, setAddForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState(emptyForm);
@@ -7058,12 +7159,6 @@ function Events({ events, expenses, categories, accounts, session, reloadAll }) 
     </div>
   );
 
-  const eventCharges = viewingEvent
-    ? expenses
-        .filter((e) => e.eventId === viewingEvent.id)
-        .sort((a, b) => b.date.localeCompare(a.date))
-    : [];
-
   return (
     <div style={{ paddingBottom: 80 }}>
       <div
@@ -7116,18 +7211,20 @@ function Events({ events, expenses, categories, accounts, session, reloadAll }) 
         {events.map((ev) => {
           const spent = totalByEvent[ev.id] || 0;
           const pct = ev.budget > 0 ? (spent / ev.budget) * 100 : null;
-          const count = expenses.filter((e) => e.eventId === ev.id).length;
+          const charges = expenses
+            .filter((e) => e.eventId === ev.id)
+            .sort((a, b) => b.date.localeCompare(a.date));
+          const count = charges.length;
+          const expanded = !!openExpanded[ev.id];
           return (
             <div
               key={ev.id}
-              onClick={() => setViewingEvent(ev)}
               style={{
                 background: C.card,
                 borderRadius: 18,
                 padding: 16,
                 border: `1px solid ${C.border}`,
                 borderLeft: `3px solid ${ev.color}`,
-                cursor: "pointer",
               }}
             >
               <div
@@ -7200,6 +7297,100 @@ function Events({ events, expenses, categories, accounts, session, reloadAll }) 
                   >
                     {pct.toFixed(1)}% del presupuesto
                   </div>
+                </>
+              )}
+              {count > 0 && (
+                <>
+                  <button
+                    onClick={() =>
+                      setOpenExpanded((p) => ({ ...p, [ev.id]: !p[ev.id] }))
+                    }
+                    style={{
+                      width: "100%",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "10px 0 0",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 800,
+                        color: C.muted,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.8,
+                        flex: 1,
+                        textAlign: "left",
+                      }}
+                    >
+                      Gastos ({count})
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: C.muted,
+                        transition: "transform .2s",
+                        transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+                      }}
+                    >
+                      ▾
+                    </span>
+                  </button>
+                  {expanded && (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
+                      {charges.map((exp) => (
+                        <div
+                          key={exp.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "6px 2px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 12,
+                              color: C.text,
+                              flex: 1,
+                              minWidth: 0,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {exp.description}
+                          </span>
+                          <span style={{ fontSize: 10, color: C.muted, flexShrink: 0 }}>
+                            {fmtDateShort(exp.date)}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: ev.color,
+                              flexShrink: 0,
+                              minWidth: 70,
+                              textAlign: "right",
+                            }}
+                          >
+                            {mxn(exp.amount)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -7310,98 +7501,6 @@ function Events({ events, expenses, categories, accounts, session, reloadAll }) 
         <SaveBtn onClick={saveEdit} color={editForm.color}>
           Guardar Cambios
         </SaveBtn>
-      </Modal>
-
-      {/* EVENT DETAIL — itemized charges */}
-      <Modal
-        open={!!viewingEvent}
-        onClose={() => setViewingEvent(null)}
-        title={`${viewingEvent?.icon || "🎉"} ${viewingEvent?.name || "Evento"}`}
-      >
-        <div style={{ fontSize: 11, color: C.sub, marginBottom: 12 }}>
-          {eventCharges.length} gasto{eventCharges.length !== 1 ? "s" : ""} · Total{" "}
-          {mxn(eventCharges.reduce((s, e) => s + e.amount, 0))}
-        </div>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            maxHeight: 420,
-            overflowY: "auto",
-          }}
-        >
-          {eventCharges.map((exp) => {
-            const cat = categories.find((c) => c.id === exp.categoryId);
-            const acc = accounts.find((a) => a.id === exp.accountId);
-            return (
-              <div
-                key={exp.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  background: C.elevated,
-                  borderRadius: 11,
-                  padding: "10px 12px",
-                  border: `1px solid ${C.border}`,
-                }}
-              >
-                <span style={{ fontSize: 20, flexShrink: 0 }}>
-                  {cat?.icon || "🧾"}
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 700,
-                      color: C.text,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {exp.description}
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 6,
-                      marginTop: 2,
-                      alignItems: "center",
-                    }}
-                  >
-                    {acc && <Tag color={acc.color}>{acc.name}</Tag>}
-                    <span style={{ fontSize: 10, color: C.muted }}>
-                      {fmtDateShort(exp.date)}
-                    </span>
-                  </div>
-                </div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 800,
-                    color: viewingEvent?.color || C.accent,
-                  }}
-                >
-                  {mxn(exp.amount)}
-                </div>
-              </div>
-            );
-          })}
-          {eventCharges.length === 0 && (
-            <div
-              style={{
-                textAlign: "center",
-                padding: "20px 0",
-                color: C.muted,
-                fontSize: 12,
-              }}
-            >
-              Sin gastos vinculados todavía
-            </div>
-          )}
-        </div>
       </Modal>
     </div>
   );
