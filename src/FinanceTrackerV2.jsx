@@ -7648,7 +7648,7 @@ function PlanCard({ plan, accounts, onEdit }) {
   );
 }
 
-function MSI({ plans, setPlans, accounts, subs, session, reloadAll }) {
+function MSI({ plans, setPlans, accounts, subs, events, expenses, session, reloadAll }) {
   const [showModal, setShowModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState(null);
   const [openActive, setOpenActive] = useState(true);
@@ -7661,6 +7661,7 @@ function MSI({ plans, setPlans, accounts, subs, session, reloadAll }) {
     accountId: accounts[0]?.id || "",
     startDate: today(),
     paidMonths: 0,
+    eventId: null,
   };
   const [form, setForm] = useState(emptyForm);
 
@@ -7702,6 +7703,7 @@ function MSI({ plans, setPlans, accounts, subs, session, reloadAll }) {
   };
   const openEdit = (plan) => {
     setEditingPlan(plan);
+    const linkedExpense = expenses?.find((e) => e.msiPlanId === plan.id);
     setForm({
       desc: plan.desc,
       total: String(plan.total),
@@ -7710,6 +7712,7 @@ function MSI({ plans, setPlans, accounts, subs, session, reloadAll }) {
       accountId: plan.accountId || accounts[0]?.id || "",
       startDate: plan.startDate || today(),
       paidMonths: plan.paidM,
+      eventId: linkedExpense?.eventId || null,
     });
     setShowModal(true);
   };
@@ -7753,7 +7756,9 @@ function MSI({ plans, setPlans, accounts, subs, session, reloadAll }) {
 
     if (editingPlan) {
       await sb.from("msi_plans").update(data).eq("id", editingPlan.id);
-      // Sync the individual expense rows with the new amount and description
+      // Sync the individual expense rows with the new amount, description,
+      // and event tag (so an MSI purchase can be tagged to an event even
+      // after the fact, like "Boleto Iberia" → "Europa 2026")
       const { data: msiRows } = await sb
         .from("expenses")
         .select("id, msi_index")
@@ -7763,6 +7768,7 @@ function MSI({ plans, setPlans, accounts, subs, session, reloadAll }) {
           sb.from("expenses").update({
             amount: monthly,
             description: `${form.desc.trim()} (${row.msi_index}/${totalM})`,
+            event_id: form.eventId || null,
           }).eq("id", row.id)
         ));
       }
@@ -7797,6 +7803,7 @@ function MSI({ plans, setPlans, accounts, subs, session, reloadAll }) {
             msi_total: totalM,
             is_tdc_payment: false,
             is_subscription: false,
+            event_id: form.eventId || null,
           }));
           await sb.from("expenses").insert(rows);
         }
@@ -8089,6 +8096,17 @@ function MSI({ plans, setPlans, accounts, subs, session, reloadAll }) {
             getColor={(a) => a.color}
           />
         </Field>
+        {events?.length > 0 && (
+          <Field label="Evento" hint="Opcional">
+            <ChipSelect
+              options={events}
+              value={form.eventId}
+              onChange={(v) => setForm((f) => ({ ...f, eventId: v }))}
+              getColor={(e) => e.color}
+              getLabel={(e) => `${e.icon} ${e.name}`}
+            />
+          </Field>
+        )}
         <Field label="Fecha de compra" hint="¿Cuándo realizaste la compra?">
           <Input
             value={form.startDate}
@@ -9270,6 +9288,8 @@ export default function App() {
           setPlans={setPlans}
           accounts={accounts}
           subs={subs}
+          events={events}
+          expenses={expenses}
           session={session}
           reloadAll={loadAll}
         />
