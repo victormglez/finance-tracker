@@ -3296,11 +3296,14 @@ function Dashboard({
 }
 
 // ─── EXPENSE ROW ──────────────────────────────────────────────────────────────
-function ExpenseRow({ exp, accounts, categories, goals, onClick }) {
+function ExpenseRow({ exp, accounts, categories, goals, events, onClick }) {
   const acc = accounts.find((a) => a.id === exp.accountId);
   const cat = categories.find((c) => c.id === exp.categoryId);
   const linkedGoal = exp.linkedGoalId
     ? goals?.find((g) => g.id === exp.linkedGoalId)
+    : null;
+  const linkedEvent = exp.eventId
+    ? events?.find((e) => e.id === exp.eventId)
     : null;
   const pd = exp.paymentDate;
   const d = pd ? daysUntil(pd) : null;
@@ -3393,6 +3396,11 @@ function ExpenseRow({ exp, accounts, categories, goals, onClick }) {
               {linkedGoal.icon} {linkedGoal.name}
             </Tag>
           )}
+          {linkedEvent && (
+            <Tag color={linkedEvent.color}>
+              {linkedEvent.icon} {linkedEvent.name}
+            </Tag>
+          )}
           {acc && <Tag color={acc.color}>{acc.name}</Tag>}
           {pd && !isMSI && !isTDC && (
             <Badge color={d !== null && d <= 3 ? C.red : C.blue}>
@@ -3428,6 +3436,7 @@ function Expenses({
   categories,
   goals,
   setGoals,
+  events,
   transfers,
   goalWithdrawals,
   session,
@@ -3579,6 +3588,7 @@ function Expenses({
     isMSI: false,
     msiMonths: "9",
     linkedGoalId: null,
+    eventId: null,
   });
 
   // Group ALL expenses by month → then by date within month
@@ -3729,6 +3739,7 @@ function Expenses({
           msi_total: numM,
           is_tdc_payment: false,
           is_subscription: false,
+          event_id: form.eventId || null,
         }));
         await sb.from("expenses").insert(rows);
       }
@@ -3761,6 +3772,7 @@ function Expenses({
         is_subscription: false,
         linked_goal_id:
           isSavingsCat && form.linkedGoalId ? form.linkedGoalId : null,
+        event_id: form.eventId || null,
       });
 
       // Update account balance (credit: adds to debt, debit: deducts from balance)
@@ -3792,6 +3804,7 @@ function Expenses({
       isMSI: false,
       msiMonths: "9",
       linkedGoalId: null,
+      eventId: null,
     }));
     setShowModal(false);
     if (reloadAll) await reloadAll();
@@ -4300,6 +4313,7 @@ function Expenses({
                               accounts={accounts}
                               categories={categories}
                               goals={goals}
+                              events={events}
                               onClick={() => setShowDetail(exp)}
                             />
                           ))}
@@ -4380,6 +4394,19 @@ function Expenses({
             getColor={(c) => c.color}
           />
         </Field>
+
+        {/* Optional: tag this expense to an event (wedding, trip, etc.) */}
+        {events?.length > 0 && (
+          <Field label="Evento" hint="Opcional">
+            <ChipSelect
+              options={events}
+              value={form.eventId}
+              onChange={(v) => setForm((f) => ({ ...f, eventId: v }))}
+              getColor={(e) => e.color}
+              getLabel={(e) => `${e.icon} ${e.name}`}
+            />
+          </Field>
+        )}
 
         {/* Savings: pick linked goal */}
         {isSavingsCat && (
@@ -4776,6 +4803,7 @@ function Expenses({
                 date: expenseEdit.date,
                 category_id: expenseEdit.categoryId || null,
                 account_id: expenseEdit.accountId || null,
+                event_id: expenseEdit.eventId || null,
                 payment_date: newPd,
               })
               .eq("id", exp.id);
@@ -4876,6 +4904,19 @@ function Expenses({
                           setExpenseEdit((f) => ({ ...f, accountId: v }))
                         }
                         getColor={(a) => a.color}
+                      />
+                    </Field>
+                  )}
+                  {events?.length > 0 && (
+                    <Field label="Evento" hint="Opcional">
+                      <ChipSelect
+                        options={events}
+                        value={expenseEdit.eventId}
+                        onChange={(v) =>
+                          setExpenseEdit((f) => ({ ...f, eventId: v }))
+                        }
+                        getColor={(e) => e.color}
+                        getLabel={(e) => `${e.icon} ${e.name}`}
                       />
                     </Field>
                   )}
@@ -5061,6 +5102,7 @@ function Expenses({
                           date: exp.date,
                           categoryId: exp.categoryId,
                           accountId: exp.accountId,
+                          eventId: exp.eventId,
                         })
                       }
                       style={{
@@ -6901,6 +6943,470 @@ function Goals({
   );
 }
 
+// ─── EVENTS ───────────────────────────────────────────────────────────────────
+// Tracks total spend toward a one-off event (a wedding, a trip) across all
+// categories/accounts — expenses opt in via an optional "Evento" tag.
+function Events({ events, expenses, categories, accounts, session, reloadAll }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [viewingEvent, setViewingEvent] = useState(null); // holds event
+  const emptyForm = { name: "", budget: "", icon: "🎉", color: "#7C6FFF" };
+  const [addForm, setAddForm] = useState(emptyForm);
+  const [editForm, setEditForm] = useState(emptyForm);
+
+  const ICONS = ["🎉", "💍", "💒", "✈️", "🏖️", "🎓", "🏠", "👶", "🎂", "🚗", "🏥", "📦"];
+  const COLS = [C.accent, C.green, C.gold, "#FF6B9D", C.red, C.blue, C.orange, "#00B4D8"];
+
+  const totalByEvent = useMemo(() => {
+    const map = {};
+    expenses.forEach((e) => {
+      if (!e.eventId) return;
+      map[e.eventId] = (map[e.eventId] || 0) + e.amount;
+    });
+    return map;
+  }, [expenses]);
+
+  const openEdit = (ev) => {
+    setEditing(ev);
+    setEditForm({
+      name: ev.name,
+      budget: ev.budget != null ? String(ev.budget) : "",
+      icon: ev.icon,
+      color: ev.color,
+    });
+  };
+
+  const saveAdd = async () => {
+    if (!addForm.name.trim()) return;
+    await sb.from("events").insert({
+      user_id: session?.user?.id,
+      name: addForm.name.trim(),
+      budget: addForm.budget ? parseFloat(addForm.budget) : null,
+      icon: addForm.icon,
+      color: addForm.color,
+    });
+    setAddForm(emptyForm);
+    setShowAdd(false);
+    if (reloadAll) await reloadAll();
+  };
+
+  const saveEdit = async () => {
+    if (!editForm.name.trim() || !editing) return;
+    await sb
+      .from("events")
+      .update({
+        name: editForm.name.trim(),
+        budget: editForm.budget ? parseFloat(editForm.budget) : null,
+        icon: editForm.icon,
+        color: editForm.color,
+      })
+      .eq("id", editing.id);
+    setEditing(null);
+    if (reloadAll) await reloadAll();
+  };
+
+  const deleteEvent = async () => {
+    if (!editing) return;
+    if (!window.confirm(`¿Eliminar "${editing.name}"? Los gastos ya hechos no se borran, solo dejarán de estar vinculados.`))
+      return;
+    await sb.from("events").delete().eq("id", editing.id);
+    setEditing(null);
+    if (reloadAll) await reloadAll();
+  };
+
+  const ColorPicker = ({ value, onChange }) => (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {COLS.map((col) => (
+        <button
+          key={col}
+          onClick={() => onChange(col)}
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            background: col,
+            border: "none",
+            cursor: "pointer",
+            outline: value === col ? "3px solid #fff" : "none",
+            outlineOffset: 2,
+          }}
+        />
+      ))}
+    </div>
+  );
+  const IconPicker = ({ value, onChange, color }) => (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      {ICONS.map((ic) => (
+        <button
+          key={ic}
+          onClick={() => onChange(ic)}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 10,
+            border: "none",
+            background: value === ic ? color + "44" : C.card,
+            fontSize: 20,
+            cursor: "pointer",
+            outline:
+              value === ic ? `2px solid ${color}` : `1px solid ${C.border}`,
+          }}
+        >
+          {ic}
+        </button>
+      ))}
+    </div>
+  );
+
+  const eventCharges = viewingEvent
+    ? expenses
+        .filter((e) => e.eventId === viewingEvent.id)
+        .sort((a, b) => b.date.localeCompare(a.date))
+    : [];
+
+  return (
+    <div style={{ paddingBottom: 80 }}>
+      <div
+        style={{
+          padding: "20px 20px 10px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 26, fontWeight: 900, color: C.text }}>
+            Eventos
+          </div>
+          <div style={{ fontSize: 13, color: C.sub, marginTop: 2 }}>
+            {mxn(Object.values(totalByEvent).reduce((s, v) => s + v, 0))} gastado
+          </div>
+        </div>
+        <button
+          onClick={() => {
+            setAddForm(emptyForm);
+            setShowAdd(true);
+          }}
+          style={{
+            background: C.accent,
+            border: "none",
+            borderRadius: 22,
+            width: 44,
+            height: 44,
+            color: "#fff",
+            fontSize: 22,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          +
+        </button>
+      </div>
+
+      <div
+        style={{
+          padding: "0 20px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        {events.map((ev) => {
+          const spent = totalByEvent[ev.id] || 0;
+          const pct = ev.budget > 0 ? (spent / ev.budget) * 100 : null;
+          const count = expenses.filter((e) => e.eventId === ev.id).length;
+          return (
+            <div
+              key={ev.id}
+              onClick={() => setViewingEvent(ev)}
+              style={{
+                background: C.card,
+                borderRadius: 18,
+                padding: 16,
+                border: `1px solid ${C.border}`,
+                borderLeft: `3px solid ${ev.color}`,
+                cursor: "pointer",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 10,
+                }}
+              >
+                <span style={{ fontSize: 24 }}>{ev.icon}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{ fontSize: 15, fontWeight: 800, color: C.text }}
+                  >
+                    {ev.name}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.sub }}>
+                    {count} gasto{count !== 1 ? "s" : ""}
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEdit(ev);
+                  }}
+                  style={{
+                    background: C.elevated,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 8,
+                    padding: "6px 8px",
+                    color: C.sub,
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  ✏️
+                </button>
+              </div>
+              <div
+                style={{
+                  fontSize: 20,
+                  fontWeight: 900,
+                  color: C.text,
+                  marginBottom: pct !== null ? 8 : 0,
+                }}
+              >
+                {mxn(spent)}
+                {ev.budget > 0 && (
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.muted }}>
+                    {" "}
+                    / {mxn(ev.budget)}
+                  </span>
+                )}
+              </div>
+              {pct !== null && (
+                <>
+                  <ProgressBar
+                    pct={Math.min(pct, 100)}
+                    color={pct >= 100 ? C.red : ev.color}
+                    h={6}
+                  />
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: pct >= 100 ? C.red : C.sub,
+                      marginTop: 4,
+                    }}
+                  >
+                    {pct.toFixed(1)}% del presupuesto
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+        {events.length === 0 && (
+          <div style={{ textAlign: "center", paddingTop: 60, color: C.muted }}>
+            <div style={{ fontSize: 40 }}>🎉</div>
+            <div style={{ marginTop: 10 }}>Sin eventos</div>
+            <div style={{ fontSize: 12, marginTop: 4 }}>
+              Crea uno para agrupar gastos de una boda, viaje, etc.
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ADD MODAL */}
+      <Modal
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        title="Nuevo Evento"
+      >
+        <Field label="Nombre">
+          <Input
+            value={addForm.name}
+            onChange={(v) => setAddForm((f) => ({ ...f, name: v }))}
+            placeholder="Ej. Boda, Europa 2026..."
+          />
+        </Field>
+        <Field label="Presupuesto (MXN)" hint="Opcional">
+          <Input
+            value={addForm.budget}
+            onChange={(v) => setAddForm((f) => ({ ...f, budget: v }))}
+            placeholder="Ej. 150000"
+            type="number"
+          />
+        </Field>
+        <Field label="Ícono">
+          <IconPicker
+            value={addForm.icon}
+            onChange={(v) => setAddForm((f) => ({ ...f, icon: v }))}
+            color={addForm.color}
+          />
+        </Field>
+        <Field label="Color">
+          <ColorPicker
+            value={addForm.color}
+            onChange={(v) => setAddForm((f) => ({ ...f, color: v }))}
+          />
+        </Field>
+        <SaveBtn onClick={saveAdd} color={addForm.color}>
+          Crear Evento
+        </SaveBtn>
+      </Modal>
+
+      {/* EDIT MODAL */}
+      <Modal
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        title="Editar Evento"
+      >
+        <Field label="Nombre">
+          <Input
+            value={editForm.name}
+            onChange={(v) => setEditForm((f) => ({ ...f, name: v }))}
+            placeholder="Nombre..."
+          />
+        </Field>
+        <Field label="Presupuesto (MXN)" hint="Opcional">
+          <Input
+            value={editForm.budget}
+            onChange={(v) => setEditForm((f) => ({ ...f, budget: v }))}
+            placeholder="Ej. 150000"
+            type="number"
+          />
+        </Field>
+        <Field label="Ícono">
+          <IconPicker
+            value={editForm.icon}
+            onChange={(v) => setEditForm((f) => ({ ...f, icon: v }))}
+            color={editForm.color}
+          />
+        </Field>
+        <Field label="Color">
+          <ColorPicker
+            value={editForm.color}
+            onChange={(v) => setEditForm((f) => ({ ...f, color: v }))}
+          />
+        </Field>
+        <button
+          onClick={deleteEvent}
+          style={{
+            width: "100%",
+            background: C.redDim,
+            border: `1px solid ${C.red}44`,
+            borderRadius: 12,
+            padding: "11px 0",
+            color: C.red,
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
+            marginBottom: 8,
+            marginTop: 4,
+          }}
+        >
+          🗑 Eliminar evento
+        </button>
+        <SaveBtn onClick={saveEdit} color={editForm.color}>
+          Guardar Cambios
+        </SaveBtn>
+      </Modal>
+
+      {/* EVENT DETAIL — itemized charges */}
+      <Modal
+        open={!!viewingEvent}
+        onClose={() => setViewingEvent(null)}
+        title={`${viewingEvent?.icon || "🎉"} ${viewingEvent?.name || "Evento"}`}
+      >
+        <div style={{ fontSize: 11, color: C.sub, marginBottom: 12 }}>
+          {eventCharges.length} gasto{eventCharges.length !== 1 ? "s" : ""} · Total{" "}
+          {mxn(eventCharges.reduce((s, e) => s + e.amount, 0))}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            maxHeight: 420,
+            overflowY: "auto",
+          }}
+        >
+          {eventCharges.map((exp) => {
+            const cat = categories.find((c) => c.id === exp.categoryId);
+            const acc = accounts.find((a) => a.id === exp.accountId);
+            return (
+              <div
+                key={exp.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  background: C.elevated,
+                  borderRadius: 11,
+                  padding: "10px 12px",
+                  border: `1px solid ${C.border}`,
+                }}
+              >
+                <span style={{ fontSize: 20, flexShrink: 0 }}>
+                  {cat?.icon || "🧾"}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: C.text,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {exp.description}
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 6,
+                      marginTop: 2,
+                      alignItems: "center",
+                    }}
+                  >
+                    {acc && <Tag color={acc.color}>{acc.name}</Tag>}
+                    <span style={{ fontSize: 10, color: C.muted }}>
+                      {fmtDateShort(exp.date)}
+                    </span>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 800,
+                    color: viewingEvent?.color || C.accent,
+                  }}
+                >
+                  {mxn(exp.amount)}
+                </div>
+              </div>
+            );
+          })}
+          {eventCharges.length === 0 && (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "20px 0",
+                color: C.muted,
+                fontSize: 12,
+              }}
+            >
+              Sin gastos vinculados todavía
+            </div>
+          )}
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 // ─── MSI ──────────────────────────────────────────────────────────────────────
 function MSISummary({ calcPaidMonths, form, C, mxn }) {
   const paid = calcPaidMonths(form.startDate, form.months);
@@ -7994,6 +8500,7 @@ const NAV_TABS = [
   { id: "expenses", icon: "🧾", label: "Gastos" },
   { id: "msi", icon: "🔄", label: "MSI" },
   { id: "goals", icon: "🎯", label: "Metas" },
+  { id: "events", icon: "🎉", label: "Eventos" },
   { id: "subs", icon: "📲", label: "Suscripciones" },
 ];
 
@@ -8468,6 +8975,7 @@ export default function App() {
   const [expenses, setExpenses] = useState([]);
   const [categories, setCategories] = useState([]);
   const [goals, setGoals] = useState([]);
+  const [events, setEvents] = useState([]);
   const [plans, setPlans] = useState([]);
   const [subs, setSubs] = useState([]);
   const [transfers, setTransfers] = useState([]);
@@ -8497,7 +9005,7 @@ export default function App() {
     // unmount the current screen and wipe its local state (open accordions,
     // in-progress edits, the async-loaded paid-cycle checkmarks).
     if (!hasLoadedOnce.current) setDataLoading(true);
-    const [accR, catR, expR, gR, msiR, subR, trR, gwR] = await Promise.all([
+    const [accR, catR, expR, gR, msiR, subR, trR, gwR, evR] = await Promise.all([
       sb.from("accounts").select("*").order("name"),
       sb.from("categories").select("*").order("name"),
       sb.from("expenses").select("*").order("date", { ascending: false }),
@@ -8512,6 +9020,10 @@ export default function App() {
         .from("goal_withdrawals")
         .select("*")
         .order("date", { ascending: false }),
+      sb
+        .from("events")
+        .select("*")
+        .order("created_at", { ascending: false }),
     ]);
     setAccounts(
       (accR.data || []).map((a) => ({
@@ -8550,7 +9062,17 @@ export default function App() {
         isTdcPayment: e.is_tdc_payment,
         isSubscription: e.is_subscription,
         linkedGoalId: e.linked_goal_id,
+        eventId: e.event_id,
         isMSIInstallment: e.is_msi,
+      })),
+    );
+    setEvents(
+      (evR.data || []).map((ev) => ({
+        id: ev.id,
+        name: ev.name,
+        icon: ev.icon,
+        color: ev.color,
+        budget: ev.budget != null ? Number(ev.budget) : null,
       })),
     );
     setGoals(
@@ -8601,6 +9123,7 @@ export default function App() {
       })),
     );
     if (gwR.error) console.error("goal_withdrawals fetch error:", gwR.error);
+    if (evR.error) console.error("events fetch error:", evR.error);
     setGoalWithdrawals(
       (gwR.data || []).map((w) => ({
         id: w.id,
@@ -8675,6 +9198,7 @@ export default function App() {
     setExpenses([]);
     setCategories([]);
     setGoals([]);
+    setEvents([]);
     setPlans([]);
     setSubs([]);
     setTransfers([]);
@@ -8733,6 +9257,7 @@ export default function App() {
           categories={categories}
           goals={goals}
           setGoals={setGoals}
+          events={events}
           transfers={transfers}
           goalWithdrawals={goalWithdrawals}
           session={session}
@@ -8756,6 +9281,16 @@ export default function App() {
           accounts={accounts}
           setAccounts={setAccounts}
           goalWithdrawals={goalWithdrawals}
+          session={session}
+          reloadAll={loadAll}
+        />
+      )}
+      {tab === "events" && (
+        <Events
+          events={events}
+          expenses={expenses}
+          categories={categories}
+          accounts={accounts}
           session={session}
           reloadAll={loadAll}
         />
