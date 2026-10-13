@@ -2171,9 +2171,15 @@ function Dashboard({
       : (isReceived ? amount : -amount);
 
   const saveTrans = async () => {
-    if (!transForm.amount || !transForm.counterparty.trim()) return;
-    const amt = parseFloat(transForm.amount);
-    if (isNaN(amt) || amt <= 0) return;
+    if (!transForm.counterparty.trim()) {
+      alert("Falta el nombre de la persona o empresa.");
+      return;
+    }
+    const amt = Math.abs(parseFloat(transForm.amount));
+    if (isNaN(amt) || amt === 0) {
+      alert("Ingresa un monto válido.");
+      return;
+    }
     const isRec = transForm.type === "received";
     await sb
       .from("transfers")
@@ -2197,9 +2203,15 @@ function Dashboard({
     if (reloadAll) await reloadAll();
   };
   const updateTrans = async () => {
-    if (!transForm.amount || !transForm.counterparty.trim()) return;
-    const amt = parseFloat(transForm.amount);
-    if (isNaN(amt) || amt <= 0) return;
+    if (!transForm.counterparty.trim()) {
+      alert("Falta el nombre de la persona o empresa.");
+      return;
+    }
+    const amt = Math.abs(parseFloat(transForm.amount));
+    if (isNaN(amt) || amt === 0) {
+      alert("Ingresa un monto válido.");
+      return;
+    }
     const orig = editingTrans;
     const origAcc = accounts.find((a) => a.id === orig.accountId);
     const newAcc = accounts.find((a) => a.id === transForm.accountId);
@@ -3059,7 +3071,7 @@ function Dashboard({
               const isRec = transForm.type === "received";
               const newBal =
                 transForm.amount && !isNaN(parseFloat(transForm.amount)) && sel
-                  ? acc.balance + transDelta(acc, isRec, parseFloat(transForm.amount))
+                  ? acc.balance + transDelta(acc, isRec, Math.abs(parseFloat(transForm.amount)))
                   : null;
               return (
                 <button
@@ -3205,7 +3217,7 @@ function Dashboard({
               const sel = transForm.accountId === acc.id;
               const isRec = transForm.type === "received";
               const newBal = transForm.amount && !isNaN(parseFloat(transForm.amount)) && sel
-                ? acc.balance + transDelta(acc, isRec, parseFloat(transForm.amount))
+                ? acc.balance + transDelta(acc, isRec, Math.abs(parseFloat(transForm.amount)))
                 : null;
               return (
                 <button key={acc.id} onClick={() => setTransForm((f) => ({ ...f, accountId: acc.id }))}
