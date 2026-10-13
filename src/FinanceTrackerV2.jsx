@@ -2204,22 +2204,27 @@ function Dashboard({
     const origAcc = accounts.find((a) => a.id === orig.accountId);
     const newAcc = accounts.find((a) => a.id === transForm.accountId);
     await sb.from("transfers").update({
+      type: transForm.type,
       amount: amt,
       account_id: transForm.accountId || null,
       counterparty: transForm.counterparty.trim(),
       date: transForm.date,
       notes: transForm.notes || null,
     }).eq("id", orig.id);
-    const isRec = orig.type === "received";
+    // Undo the OLD effect using the type it was originally saved with, then
+    // apply the NEW effect using the (possibly changed) type from the form —
+    // these can differ if the user is fixing a Recibí/Envié mistake.
+    const wasRec = orig.type === "received";
+    const isRec = transForm.type === "received";
     if (origAcc?.id === newAcc?.id) {
       // Same account: undo old + apply new in one step to avoid stale-state overwrite
       if (origAcc)
         await sb.from("accounts").update({
-          balance: origAcc.balance - transDelta(origAcc, isRec, orig.amount) + transDelta(origAcc, isRec, amt),
+          balance: origAcc.balance - transDelta(origAcc, wasRec, orig.amount) + transDelta(origAcc, isRec, amt),
         }).eq("id", origAcc.id);
     } else {
       if (origAcc)
-        await sb.from("accounts").update({ balance: origAcc.balance - transDelta(origAcc, isRec, orig.amount) }).eq("id", origAcc.id);
+        await sb.from("accounts").update({ balance: origAcc.balance - transDelta(origAcc, wasRec, orig.amount) }).eq("id", origAcc.id);
       if (newAcc)
         await sb.from("accounts").update({ balance: newAcc.balance + transDelta(newAcc, isRec, amt) }).eq("id", newAcc.id);
     }
@@ -3156,6 +3161,38 @@ function Dashboard({
       </Modal>
 
       <Modal open={!!editingTrans} onClose={() => setEditingTrans(null)} title="Editar Transferencia">
+        <Field label="Tipo" hint="Relativo a la cuenta elegida abajo">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 4 }}>
+            {[
+              ["received", "📥", "Recibí", C.green],
+              ["sent", "📤", "Envié", C.red],
+            ].map(([type, icon, label, col]) => {
+              const active = transForm.type === type;
+              return (
+                <button
+                  key={type}
+                  onClick={() => setTransForm((f) => ({ ...f, type }))}
+                  style={{
+                    background: active ? col + "22" : C.card,
+                    border: `1.5px solid ${active ? col : C.border}`,
+                    borderRadius: 13,
+                    padding: "12px 8px",
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  <span style={{ fontSize: 22 }}>{icon}</span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: active ? col : C.text }}>
+                    {label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </Field>
         <Field label={transForm.type === "received" ? "¿De quién recibiste?" : "¿A quién enviaste?"}>
           <Input value={transForm.counterparty} onChange={(v) => setTransForm((f) => ({ ...f, counterparty: v }))} placeholder="Nombre o empresa..." />
         </Field>
