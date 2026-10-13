@@ -3054,10 +3054,7 @@ function Dashboard({
               const isRec = transForm.type === "received";
               const newBal =
                 transForm.amount && !isNaN(parseFloat(transForm.amount)) && sel
-                  ? acc.balance +
-                    (isRec
-                      ? parseFloat(transForm.amount)
-                      : -parseFloat(transForm.amount))
+                  ? acc.balance + transDelta(acc, isRec, parseFloat(transForm.amount))
                   : null;
               return (
                 <button
@@ -3171,7 +3168,7 @@ function Dashboard({
               const sel = transForm.accountId === acc.id;
               const isRec = transForm.type === "received";
               const newBal = transForm.amount && !isNaN(parseFloat(transForm.amount)) && sel
-                ? acc.balance + (isRec ? parseFloat(transForm.amount) : -parseFloat(transForm.amount))
+                ? acc.balance + transDelta(acc, isRec, parseFloat(transForm.amount))
                 : null;
               return (
                 <button key={acc.id} onClick={() => setTransForm((f) => ({ ...f, accountId: acc.id }))}
