@@ -6271,12 +6271,30 @@ function Goals({
   // it — past expenses linked to it keep showing its name/icon correctly,
   // unlike a hard delete which would orphan that link.
   const archiveGoal = async (goal) => {
-    await sb.from("goals").update({ archived: true }).eq("id", goal.id);
+    const { error } = await sb
+      .from("goals")
+      .update({ archived: true })
+      .eq("id", goal.id);
+    if (error) {
+      console.error("archive goal failed:", error);
+      alert(
+        `No se pudo archivar la meta:\n${error.message}\n\n¿Ya agregaste la columna "archived" a la tabla "goals" en Supabase?`,
+      );
+      return;
+    }
     setEditing(null);
     if (reloadAll) await reloadAll();
   };
   const unarchiveGoal = async (goal) => {
-    await sb.from("goals").update({ archived: false }).eq("id", goal.id);
+    const { error } = await sb
+      .from("goals")
+      .update({ archived: false })
+      .eq("id", goal.id);
+    if (error) {
+      console.error("unarchive goal failed:", error);
+      alert(`No se pudo restaurar la meta:\n${error.message}`);
+      return;
+    }
     if (reloadAll) await reloadAll();
   };
 
