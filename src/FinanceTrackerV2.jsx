@@ -2028,7 +2028,10 @@ function Dashboard({
     const totalDue = closedCycleAmount(payingCard);
     const payKey = cyclePayKey(payingCard);
     const nominaAcc = accounts.find((a) => a.type === "debit");
-    if (nominaAcc && nominaAcc.balance < amt) {
+    // Allow a one-cent tolerance — stored balances are plain floats, so an
+    // amount that's exactly equal to the cent can drift by a sliver (e.g.
+    // 2123.249999999998) after many additions/subtractions.
+    if (nominaAcc && nominaAcc.balance < amt - 0.01) {
       alert(
         `Saldo insuficiente en ${nominaAcc.name}.\nDisponible: ${mxn(nominaAcc.balance)}\nNecesitas: ${mxn(amt)}`,
       );
@@ -5494,7 +5497,7 @@ function Expenses({
             const amt = parseFloat(payTDCForm.amount);
             const newTDC = tdc ? tdc.balance - amt : 0;
             const newNomina = nomina ? nomina.balance - amt : 0;
-            const insufficient = nomina && amt > nomina.balance;
+            const insufficient = nomina && amt > nomina.balance + 0.01;
             return (
               <div
                 style={{
@@ -5617,7 +5620,9 @@ function Expenses({
             const amt = parseFloat(payTDCForm.amount);
             if (isNaN(amt) || amt <= 0) return;
             const nominaAcc = accounts.find((a) => a.type === "debit");
-            if (nominaAcc && nominaAcc.balance < amt) {
+            // One-cent tolerance for float drift — see note on the other
+            // insufficient-funds check.
+            if (nominaAcc && nominaAcc.balance < amt - 0.01) {
               alert(
                 `Saldo insuficiente en ${nominaAcc.name}.\nDisponible: ${mxn(nominaAcc.balance)}\nNecesitas: ${mxn(amt)}`,
               );
