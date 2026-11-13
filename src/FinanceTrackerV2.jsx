@@ -106,6 +106,25 @@ function closedCyclePayDate(acc) {
   return calcPaymentDate(dbc, acc.cutDay, acc.payDay);
 }
 
+// The pay-date of the cycle that's still OPEN (accumulating charges, not
+// yet cut) — i.e. whatever a purchase made today would be billed to.
+// Lets the user preview what the next statement is shaping up to be.
+function openCyclePayDate(acc) {
+  if (!acc?.cutDay || !acc?.payDay) return null;
+  return calcPaymentDate(today(), acc.cutDay, acc.payDay);
+}
+// Start/end purchase dates of the open cycle: from the most recent cut day
+// (inclusive) up to the day before the next cut.
+function openCycleRange(acc) {
+  if (!acc?.cutDay) return null;
+  const now = new Date();
+  let start = new Date(now.getFullYear(), now.getMonth(), acc.cutDay);
+  if (start > now) start = new Date(now.getFullYear(), now.getMonth() - 1, acc.cutDay);
+  const end = new Date(start.getFullYear(), start.getMonth() + 1, acc.cutDay - 1);
+  const f = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { start: f(start), end: f(end) };
+}
+
 // MSI payment date sequence starting from purchaseDate
 function getMsiPaymentDates(purchaseDate, acc, numMonths) {
   if (!acc?.cutDay || !acc?.payDay) return [];
@@ -889,7 +908,7 @@ function NumberStepper({ value, onChange, min = 0, max = 999 }) {
 }
 
 // ─── ACCOUNT CARD ─────────────────────────────────────────────────────────────
-function AccountCard({ acc, onClick, onViewCharges, closedAmount, isCyclePaid, onQuickPay, onEditCycle }) {
+function AccountCard({ acc, onClick, onViewCharges, closedAmount, isCyclePaid, onQuickPay, onEditCycle, openAmount, openCount, onPreviewOpen }) {
   const pct = acc.type === "credit" ? utilPct(acc.balance, acc.limit) : null;
   const nextCut = acc.cutDay ? nextOccurrence(acc.cutDay) : null;
   const nextPay = acc.payDay ? nextOccurrence(acc.payDay) : null;
@@ -1073,6 +1092,35 @@ function AccountCard({ acc, onClick, onViewCharges, closedAmount, isCyclePaid, o
             : closedAmount
               ? `💳 Pagar ${mxn(closedAmount)}`
               : "🔒 Corte sin cerrar"}
+        </button>
+      )}
+      {acc.type === "credit" && onPreviewOpen && acc.cutDay && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onPreviewOpen();
+          }}
+          title="Ver cargos del corte en curso"
+          style={{
+            width: "100%",
+            marginTop: 6,
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: "4px 2px 0",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 10,
+            color: C.sub,
+          }}
+        >
+          <span style={{ flex: 1, textAlign: "left" }}>
+            📊 Próximo corte:{" "}
+            <b style={{ color: C.text }}>{mxn(openAmount || 0)}</b>
+            {openCount > 0 && ` · ${openCount} cargo${openCount !== 1 ? "s" : ""}`}
+          </span>
+          <span style={{ color: C.muted }}>›</span>
         </button>
       )}
     </div>
@@ -2017,6 +2065,18 @@ function Dashboard({
   const closedCycleAmount = (acc) =>
     closedCycleCharges(acc).reduce((s, e) => s + e.amount, 0);
 
+  // The still-open cycle: charges accumulating toward the NEXT cutoff.
+  const openCycleCharges = (acc) => {
+    const pd = openCyclePayDate(acc);
+    if (!pd) return [];
+    return expenses
+      .filter((e) => e.accountId === acc.id && e.paymentDate === pd)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  };
+  const openCycleAmount = (acc) =>
+    openCycleCharges(acc).reduce((s, e) => s + e.amount, 0);
+  const [previewingCard, setPreviewingCard] = useState(null); // holds acc
+
   const openQuickPay = (acc) => {
     setPayCardAmount(String(closedCycleAmount(acc)));
     setPayingCard(acc);
@@ -2395,6 +2455,11 @@ function Dashboard({
               onEditCycle={
                 acc.type === "credit" ? () => openEditCycle(acc) : null
               }
+              openAmount={acc.type === "credit" ? openCycleAmount(acc) : 0}
+              openCount={
+                acc.type === "credit" ? openCycleCharges(acc).length : 0
+              }
+              onPreviewOpen={() => setPreviewingCard(acc)}
             />
           ))}
         </div>
@@ -2951,6 +3016,131 @@ function Dashboard({
         <SaveBtn onClick={confirmQuickPay} color={C.green}>
           Registrar Pago
         </SaveBtn>
+      </Modal>
+
+      {/* Preview of the still-open cycle (not yet cut) */}
+      <Modal
+        open={!!previewingCard}
+        onClose={() => setPreviewingCard(null)}
+        title={`📊 Próximo corte · ${previewingCard?.name || "Tarjeta"}`}
+      >
+        {previewingCard &&
+          (() => {
+            const charges = openCycleCharges(previewingCard);
+            const total = charges.reduce((s, e) => s + e.amount, 0);
+            const nextCut = nextOccurrence(previewingCard.cutDay);
+            const due = openCyclePayDate(previewingCard);
+            const range = openCycleRange(previewingCard);
+            return (
+              <>
+                <div
+                  style={{
+                    background: C.elevated,
+                    borderRadius: 12,
+                    padding: "12px 14px",
+                    marginBottom: 14,
+                    border: `1px solid ${previewingCard.color}44`,
+                    borderLeft: `3px solid ${previewingCard.color}`,
+                  }}
+                >
+                  <div style={{ fontSize: 22, fontWeight: 900, color: C.text }}>
+                    {mxn(total)}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.sub, marginTop: 4 }}>
+                    {charges.length} cargo{charges.length !== 1 ? "s" : ""} acumulado
+                    {charges.length !== 1 ? "s" : ""} hasta hoy
+                  </div>
+                  {range && (
+                    <div style={{ fontSize: 11, color: C.text, marginTop: 6, fontWeight: 700 }}>
+                      Periodo actual: {fmtDateShort(range.start)} → {fmtDateShort(range.end)}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, color: C.sub, marginTop: 4 }}>
+                    Corta el{" "}
+                    <b style={{ color: C.orange }}>{fmtDate(nextCut)}</b>
+                    {due && (
+                      <>
+                        {" "}· Vence el{" "}
+                        <b style={{ color: C.blue }}>{fmtDate(due)}</b>
+                      </>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>
+                    Este monto puede seguir creciendo hasta la fecha de corte.
+                  </div>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    maxHeight: 360,
+                    overflowY: "auto",
+                  }}
+                >
+                  {charges.map((exp) => {
+                    const cat = categories.find((c) => c.id === exp.categoryId);
+                    return (
+                      <div
+                        key={exp.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          background: C.elevated,
+                          borderRadius: 11,
+                          padding: "9px 12px",
+                          border: `1px solid ${C.border}`,
+                        }}
+                      >
+                        <span style={{ fontSize: 18, flexShrink: 0 }}>
+                          {cat?.icon || "🧾"}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: C.text,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {exp.description}
+                          </div>
+                          <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
+                            {fmtDateShort(exp.date)}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: previewingCard.color,
+                          }}
+                        >
+                          {mxn(exp.amount)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {charges.length === 0 && (
+                    <div
+                      style={{
+                        textAlign: "center",
+                        padding: "16px 0",
+                        color: C.muted,
+                        fontSize: 12,
+                      }}
+                    >
+                      Sin cargos en el corte en curso
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
       </Modal>
 
       <Modal
